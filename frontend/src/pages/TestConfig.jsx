@@ -20,6 +20,9 @@ export default function TestConfig() {
   const [lobSearch, setLobSearch] = useState('')
   const [envFilter, setEnvFilter] = useState('')
   const [selectedLob, setSelectedLob] = useState(null)
+  const [apiFilter, setApiFilter] = useState('all')
+  const [showProdWarning, setShowProdWarning] = useState(false)
+  const [pendingRunType, setPendingRunType] = useState(null)
   const [showRunningPopup, setShowRunningPopup] = useState(false)
   const [showMappingWarning, setShowMappingWarning] = useState(false)
   const [tool, setTool] = useState('k6')
@@ -54,9 +57,21 @@ export default function TestConfig() {
     duration_seconds: Number(config.duration_seconds),
     ramp_up_seconds: Number(config.ramp_up_seconds),
     iterations: config.iterations ? Number(config.iterations) : null,
+    api_filter: apiFilter,
   })
 
   const startRun = async (type) => {
+    if (!selectedLob) return
+    // Prod warning
+    if (selectedLob.environment === 'prod') {
+      setPendingRunType(type)
+      setShowProdWarning(true)
+      return
+    }
+    await _executeRun(type)
+  }
+
+  const _executeRun = async (type) => {
     if (!selectedLob) return
     // Check mappings first
     try {
@@ -167,7 +182,6 @@ export default function TestConfig() {
                       selectedLob?.id === lob.id ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300 text-gray-700'
                     }`}>
                     <div className="font-medium">{lob.name}</div>
-                    <div className="text-xs text-gray-400 mt-0.5 font-mono truncate">{lob.base_url}</div>
                   </button>
                 ))}
             </div>
@@ -325,6 +339,26 @@ export default function TestConfig() {
               ))}
             </div>
           </div>
+          {/* API filter */}
+          <div className="bg-white border border-gray-100 rounded-xl p-5">
+            <h2 className="text-sm font-medium text-gray-900 mb-3">API filter</h2>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'all',  label: 'All APIs',      icon: 'ti-api',        desc: 'Run all mapped APIs' },
+                { id: 'get',  label: 'GET only',       icon: 'ti-download',   desc: 'Read-only — safe for prod' },
+                { id: 'post', label: 'POST/PUT only',  icon: 'ti-upload',     desc: 'Write APIs only' },
+              ].map(f => (
+                <button key={f.id} onClick={() => setApiFilter(f.id)}
+                  className={`p-3 rounded-xl border-2 text-left transition-colors ${apiFilter===f.id?'border-indigo-400 bg-indigo-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <i className={`ti ${f.icon} text-sm ${apiFilter===f.id?'text-indigo-600':'text-gray-400'}`} />
+                    <span className="text-xs font-semibold text-gray-900">{f.label}</span>
+                  </div>
+                  <p className="text-xs text-gray-400">{f.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Actions panel */}
@@ -361,22 +395,6 @@ export default function TestConfig() {
                 </button>
               )}
             </div>
-
-            {selectedLob && (
-              <div className="mt-4 pt-4 border-t border-gray-100 space-y-1 text-xs text-gray-500">
-                <div className="flex justify-between"><span>LOB</span><span className="font-medium text-gray-800">{selectedLob.name}</span></div>
-                <div className="flex justify-between"><span>Environment</span><span className="font-medium text-gray-800">{selectedLob.environment}</span></div>
-                {mode === 'single' && <>
-                  <div className="flex justify-between"><span>VUs</span><span className="font-medium text-gray-800">{config.virtual_users}</span></div>
-                  <div className="flex justify-between"><span>Duration</span><span className="font-medium text-gray-800">{config.duration_seconds}s</span></div>
-                </>}
-                {mode === 'multi' && <>
-                  <div className="flex justify-between"><span>Iterations</span><span className="font-medium text-gray-800">{iterList.length}</span></div>
-                  <div className="flex justify-between"><span>VU range</span><span className="font-medium text-gray-800">{Math.min(...iterList.map(i=>i.virtual_users))}–{Math.max(...iterList.map(i=>i.virtual_users))}</span></div>
-                  <div className="flex justify-between"><span>Total time</span><span className="font-medium text-gray-800">~{Math.round(totalDuration/60)}min</span></div>
-                </>}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -474,6 +492,34 @@ export default function TestConfig() {
           })()}
         </div>
       )}
+      {/* Prod warning popup */}
+      {showProdWarning && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 shadow-xl text-center max-w-sm mx-4 border-2 border-red-200">
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="ti ti-alert-triangle text-red-500 text-3xl" />
+            </div>
+            <h2 className="text-lg font-bold text-red-600 mb-2">⚠️ Production Environment</h2>
+            <p className="text-sm text-gray-600 mb-2">
+              You are about to run a load test on <strong>{selectedLob?.name}</strong> in <strong>Production</strong>.
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              This will send real traffic to your live system. Make sure you have approval and are testing during off-peak hours.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => { setShowProdWarning(false); setPendingRunType(null) }}
+                className="px-5 py-2.5 text-sm border border-gray-200 rounded-xl hover:bg-gray-50 font-medium">
+                Cancel
+              </button>
+              <button onClick={() => { setShowProdWarning(false); _executeRun(pendingRunType) }}
+                className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 font-medium">
+                Yes, proceed anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Running popup */}
       {showRunningPopup && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

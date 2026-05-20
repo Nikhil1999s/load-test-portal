@@ -19,11 +19,12 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 
 class RunConfig(BaseModel):
     lob_id: int
-    tool: str = "k6"           # k6 | jmeter
+    tool: str = "k6"
     virtual_users: int = 10
     duration_seconds: int = 60
     ramp_up_seconds: int = 10
     iterations: Optional[int] = None
+    api_filter: str = "all"  # all | get | post
 
 
 class RunResponse(BaseModel):
@@ -43,22 +44,32 @@ class RunResponse(BaseModel):
         from_attributes = True
 
 
-def _load_lob_and_mappings(lob_id: int, db: Session):
+def _load_lob_and_mappings(lob_id: int, db: Session, api_filter: str = "all"):
     lob = db.query(models.LOB).filter(models.LOB.id == lob_id).first()
     if not lob:
         raise HTTPException(status_code=404, detail="LOB not found")
 
-    mappings = (
+    query = (
         db.query(models.LOBAPIMapping)
         .options(joinedload(models.LOBAPIMapping.api))
         .filter(
             models.LOBAPIMapping.lob_id == lob_id,
             models.LOBAPIMapping.enabled == True,
         )
-        .all()
     )
+    mappings = query.all()
+
+    # Apply API method filter
+    if api_filter == "get":
+        mappings = [m for m in mappings if m.api.method.upper() == "GET"]
+    elif api_filter == "post":
+        mappings = [m for m in mappings if m.api.method.upper() in ("POST", "PUT", "PATCH")]
+
     if not mappings:
-        raise HTTPException(status_code=400, detail="No APIs enabled for this LOB. Configure mappings first.")
+        detail = "No APIs enabled for this LOB."
+        if api_filter != "all":
+            detail = f"No {api_filter.upper()} APIs enabled for this LOB."
+        raise HTTPException(status_code=400, detail=detail)
 
     for m in mappings:
         m.api_method = m.api.method
@@ -68,7 +79,7 @@ def _load_lob_and_mappings(lob_id: int, db: Session):
 
 @router.post("/preview/k6", response_class=PlainTextResponse)
 def preview_k6(config: RunConfig, db: Session = Depends(get_db)):
-    lob, mappings = _load_lob_and_mappings(config.lob_id, db)
+    lob, mappings = _load_lob_and_mappings(config.lob_id, db, config.api_filter)
     script = generate_k6_script(
         lob, mappings,
         config.virtual_users, config.duration_seconds,
@@ -79,7 +90,7 @@ def preview_k6(config: RunConfig, db: Session = Depends(get_db)):
 
 @router.post("/download/k6")
 def download_k6(config: RunConfig, db: Session = Depends(get_db)):
-    lob, mappings = _load_lob_and_mappings(config.lob_id, db)
+    lob, mappings = _load_lob_and_mappings(config.lob_id, db, config.api_filter)
     script = generate_k6_script(
         lob, mappings,
         config.virtual_users, config.duration_seconds,
@@ -95,7 +106,7 @@ def download_k6(config: RunConfig, db: Session = Depends(get_db)):
 
 @router.post("/download/jmx")
 def download_jmx(config: RunConfig, db: Session = Depends(get_db)):
-    lob, mappings = _load_lob_and_mappings(config.lob_id, db)
+    lob, mappings = _load_lob_and_mappings(config.lob_id, db, config.api_filter)
     jmx = generate_jmx(
         lob, mappings,
         config.virtual_users, config.duration_seconds,
@@ -140,8 +151,9 @@ def _parse_k6_output(stdout: str) -> dict:
         if metric == "http_req_duration" and name:
             ep = name.split("?")[0].split("//")[-1]
             ep = "/" + "/".join(ep.split("/")[1:]) if "/" in ep else ep
+            method = tags.get("method", "GET").upper()
             if ep not in by_endpoint:
-                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0}
+                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0, "method": method}
             by_endpoint[ep]["latencies"].append(value)
             by_endpoint[ep]["count"] += 1
 
@@ -185,6 +197,7 @@ def _parse_k6_output(stdout: str) -> dict:
             ep: {
                 "count":   d["count"],
                 "errors":  d["errors"],
+                "method":  d.get("method", "GET"),
                 "p50_ms":  pct(d["latencies"], 50),
                 "p90_ms":  pct(d["latencies"], 90),
                 "p99_ms":  pct(d["latencies"], 99),
@@ -197,7 +210,7 @@ def _parse_k6_output(stdout: str) -> dict:
 
 @router.post("/run/k6", response_model=RunResponse)
 def run_k6(config: RunConfig, db: Session = Depends(get_db)):
-    lob, mappings = _load_lob_and_mappings(config.lob_id, db)
+    lob, mappings = _load_lob_and_mappings(config.lob_id, db, config.api_filter)
 
     run = models.TestRun(
         lob_id=config.lob_id,
@@ -335,7 +348,7 @@ def _parse_jtl(jtl_path: str) -> dict:
 
 @router.post("/run/jmeter", response_model=RunResponse)
 def run_jmeter(config: RunConfig, db: Session = Depends(get_db)):
-    lob, mappings = _load_lob_and_mappings(config.lob_id, db)
+    lob, mappings = _load_lob_and_mappings(config.lob_id, db, config.api_filter)
 
     run = models.TestRun(
         lob_id=config.lob_id,

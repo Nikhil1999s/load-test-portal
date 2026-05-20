@@ -33,7 +33,7 @@ function InfoTooltip({ text }) {
   return (
     <span className="relative inline-block ml-1">
       <button type="button" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}
-        className="text-gray-300 hover:text-indigo-400 transition-colors">
+        className="text-teal-400 hover:text-teal-600 transition-colors">
         <i className="ti ti-info-circle text-xs" />
       </button>
       {show && (
@@ -47,9 +47,15 @@ function InfoTooltip({ text }) {
 }
 
 function PassBadge({ pass }) {
-  return pass
-    ? <span className="inline-flex items-center gap-1 text-xs font-semibold bg-green-50 text-green-700 px-2 py-0.5 rounded-full border border-green-200"><i className="ti ti-circle-check" />PASS</span>
-    : <span className="inline-flex items-center gap-1 text-xs font-semibold bg-red-50 text-red-700 px-2 py-0.5 rounded-full border border-red-200"><i className="ti ti-circle-x" />FAIL</span>
+  return pass ? (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-green-50 text-green-700 border-2 border-green-400 px-3 py-1 rounded-full">
+      <i className="ti ti-check text-sm" /> PASS
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-red-50 text-red-700 border-2 border-red-400 px-3 py-1 rounded-full">
+      <i className="ti ti-x text-sm" /> FAIL
+    </span>
+  )
 }
 
 function downloadBlob(blob, filename) {
@@ -151,14 +157,39 @@ export default function Reports() {
           <div className="space-y-4">
 
             {/* Header card with logo */}
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <img src="/logo.png" alt="salescode.ai" className="h-8 mb-3" onError={e => { e.target.style.display='none' }} />
-                  <h1 className="text-xl font-bold text-gray-900">{detail.lob?.name}</h1>
-                  <p className="text-sm text-gray-500 mt-0.5">API Performance Testing — Load &amp; Stress Test Report</p>
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <span className="text-xs text-gray-500">LOB Name</span>
+                      <h1 className="text-xl text-gray-900">{detail.lob?.name}</h1>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">API Performance Testing — Load &amp; Stress Test Report</p>
                 </div>
-                {has && <PassBadge pass={overall} />}
+                {/* Download button - top right, always visible */}
+                <div className="relative">
+                  <button onClick={() => setShowPdfOptions(s => !s)} disabled={pdfLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-bold rounded-xl hover:bg-teal-700 disabled:opacity-60 shadow-sm">
+                    <i className={`ti ${pdfLoading?'ti-loader-2 animate-spin':'ti-file-download'}`} />
+                    {pdfLoading ? 'Generating...' : 'Download Report'}
+                    <i className="ti ti-chevron-down text-xs" />
+                  </button>
+                  {showPdfOptions && (
+                    <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden w-52">
+                      <button onClick={() => downloadPdf('internal')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 border-b border-gray-100">
+                        <div className="font-medium text-gray-900">Internal</div>
+                        <div className="text-xs text-gray-400">Full technical detail</div>
+                      </button>
+                      <button onClick={() => downloadPdf('external')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">
+                        <div className="font-medium text-gray-900">External</div>
+                        <div className="text-xs text-gray-400">Executive summary — for clients</div>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-3 text-xs">
                 {[
@@ -167,9 +198,9 @@ export default function Reports() {
                   ['Date', new Date(detail.run?.created_at).toLocaleDateString()],
                   ['Run ID', `#${detail.run?.id}`],
                 ].map(([l,v]) => (
-                  <div key={l} className="bg-gray-50 rounded-lg p-2.5">
+                  <div key={l} className="bg-white rounded-lg p-2.5 border border-blue-100">
                     <div className="text-gray-400 mb-0.5">{l}</div>
-                    <div className="font-semibold text-gray-800">{v}</div>
+                    <div className="text-gray-800">{v}</div>
                   </div>
                 ))}
               </div>
@@ -183,8 +214,11 @@ export default function Reports() {
 
             {/* Executive summary */}
             {has && (
-              <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
-                <h2 className="text-sm font-semibold text-gray-900 mb-4">Executive summary</h2>
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center justify-between">
+                Executive summary
+                {has && <PassBadge pass={overall} />}
+              </h2>
                 <div className="grid grid-cols-5 gap-2 mb-4">
                   {[
                     ['Total requests', (m.total_requests||0).toLocaleString()],
@@ -218,7 +252,7 @@ export default function Reports() {
             )}
 
             {/* Test parameters */}
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
               <h2 className="text-sm font-semibold text-gray-900 mb-3">Test parameters</h2>
               <div className="grid grid-cols-3 gap-2 text-xs">
                 {[
@@ -239,13 +273,13 @@ export default function Reports() {
 
             {/* Per-endpoint */}
             {has && m.by_endpoint && Object.keys(m.by_endpoint).length > 0 && (
-              <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
                 <h2 className="text-sm font-semibold text-gray-900 mb-3">Per-endpoint breakdown</h2>
-                <div className="overflow-hidden rounded-xl border border-gray-100">
+                <div className="overflow-hidden rounded-xl border border-gray-100" style={{fontFamily:'Arial,Helvetica,sans-serif'}}>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-teal-600 text-white">
-                        {['Endpoint','Requests','p50','p90','p99','Errors','Status'].map(h => (
+                        {['Method','Endpoint','Requests','p50','p90','p99','Errors','Status'].map(h => (
                           <th key={h} className={`py-2.5 px-3 font-medium ${h==='Endpoint'?'text-left':'text-center'}`}>{h}</th>
                         ))}
                       </tr>
@@ -253,8 +287,13 @@ export default function Reports() {
                     <tbody>
                       {Object.entries(m.by_endpoint).map(([ep, d], i) => {
                         const epPass = d.p99_ms<=(t.p99_max_ms||2000) && (d.errors/Math.max(d.count,1)*100)<=(t.error_rate_max_pct||5)
+                        const METHOD_COLORS = { GET:'bg-blue-50 text-blue-700', POST:'bg-green-50 text-green-700', PUT:'bg-amber-50 text-amber-700', DELETE:'bg-red-50 text-red-700', PATCH:'bg-purple-50 text-purple-700' }
+                        const method = d.method || 'GET'
                         return (
                           <tr key={ep} className={i%2===0?'bg-white':'bg-gray-50'}>
+                            <td className="py-2 px-3 text-center">
+                              <span className={`font-mono font-semibold px-2 py-0.5 rounded text-xs ${METHOD_COLORS[method]||'bg-gray-100 text-gray-600'}`}>{method}</span>
+                            </td>
                             <td className="py-2 px-3 font-mono text-gray-700 max-w-xs truncate">{ep}</td>
                             <td className="py-2 px-3 text-center text-gray-600">{d.count}</td>
                             <td className="py-2 px-3 text-center text-gray-600">{d.p50_ms}ms</td>
@@ -272,7 +311,7 @@ export default function Reports() {
             )}
 
             {/* Thresholds */}
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">Pass/fail thresholds — {detail.lob?.name}</h2>
                 {!threshEdit
@@ -310,31 +349,6 @@ export default function Reports() {
               )}
             </div>
 
-            {/* Download */}
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-gray-900 mb-1">Download report</h2>
-              <p className="text-xs text-gray-400 mb-4">Choose version — internal includes full technical detail, external shows executive summary only.</p>
-              <div className="relative inline-block">
-                <button onClick={() => setShowPdfOptions(s => !s)} disabled={pdfLoading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700 disabled:opacity-60 shadow-sm">
-                  <i className={`ti ${pdfLoading?'ti-loader-2 animate-spin':'ti-file-download'}`} />
-                  {pdfLoading ? 'Generating...' : 'Download PDF'}
-                  <i className="ti ti-chevron-down text-xs" />
-                </button>
-                {showPdfOptions && (
-                  <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden w-52">
-                    <button onClick={() => downloadPdf('internal')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 border-b border-gray-100">
-                      <div className="font-medium text-gray-900">Internal</div>
-                      <div className="text-xs text-gray-400">Full technical detail</div>
-                    </button>
-                    <button onClick={() => downloadPdf('external')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">
-                      <div className="font-medium text-gray-900">External</div>
-                      <div className="text-xs text-gray-400">Executive summary — for clients</div>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         ) : <div className="py-20 text-center text-sm text-gray-400">Failed to load.</div>}
       </div>

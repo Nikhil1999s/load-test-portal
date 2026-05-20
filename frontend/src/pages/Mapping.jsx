@@ -61,7 +61,14 @@ export default function Mapping() {
   const toggleBodyExpand = (apiId) =>
     setExpandedBody(p => ({ ...p, [apiId]: !p[apiId] }))
 
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+
   const handleSave = async () => {
+    setShowSaveConfirm(true)
+  }
+
+  const confirmSave = async () => {
+    setShowSaveConfirm(false)
     setSaving(true)
     setError(null)
     try {
@@ -240,10 +247,20 @@ export default function Mapping() {
                             <td colSpan={6} className="px-8 py-3">
                               <div className="flex items-start gap-3">
                                 <div className="flex-1">
-                                  <p className="text-xs text-gray-500 mb-1.5 font-medium">
-                                    Custom request body for <span className="text-indigo-600">{selectedLob.name}</span>
-                                    <span className="text-gray-400 font-normal ml-1">(overrides default)</span>
-                                  </p>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <p className="text-xs text-gray-500 font-medium">
+                                      Custom request body for <span className="text-indigo-600">{selectedLob.name}</span>
+                                      <span className="text-gray-400 font-normal ml-1">(overrides default)</span>
+                                    </p>
+                                    <button type="button" onClick={() => {
+                                      try {
+                                        const body = m.custom_body ?? m.api_default_body ?? ''
+                                        setBody(m.api_id, JSON.stringify(JSON.parse(body), null, 2))
+                                      } catch { alert('Invalid JSON — cannot beautify') }
+                                    }} className="text-xs text-indigo-500 hover:text-indigo-700 border border-indigo-200 rounded px-2 py-0.5 hover:bg-indigo-50">
+                                      <i className="ti ti-wand mr-1" />Beautify JSON
+                                    </button>
+                                  </div>
                                   <textarea
                                     value={m.custom_body ?? m.api_default_body ?? ''}
                                     onChange={e => setBody(m.api_id, e.target.value)}
@@ -275,6 +292,31 @@ export default function Mapping() {
           )}
         </div>
       </div>
+
+      {/* Save confirmation popup */}
+      {showSaveConfirm && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 shadow-xl text-center max-w-sm mx-4">
+            <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="ti ti-checkbox text-indigo-600 text-3xl" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Ready to save?</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Please ensure all request bodies have been validated and contain the correct data for <strong>{selectedLob?.name}</strong> before saving. Incorrect payloads may cause test failures.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setShowSaveConfirm(false)}
+                className="px-5 py-2.5 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">
+                Go back & review
+              </button>
+              <button onClick={confirmSave} disabled={saving}
+                className="px-5 py-2.5 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-60">
+                {saving ? 'Saving...' : 'Yes, all good — save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
