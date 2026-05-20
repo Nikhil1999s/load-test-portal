@@ -122,11 +122,11 @@ export default function Reports() {
     catch { alert('Failed to save') } finally { setThreshSaving(false) }
   }
 
-  const downloadPdf = async (version) => {
-    setPdfLoading(true); setShowPdfOptions(false)
+  const downloadPdf = async () => {
+    setPdfLoading(true)
     try {
-      const res = await reportsApi.pdf({ run_id: selected.id, version, custom_obs: customObs, qa_name: qaName })
-      downloadBlob(res.data, `${selected.lob_name}_run${selected.id}_${version}.pdf`)
+      const res = await reportsApi.pdf({ run_id: selected.id, custom_obs: customObs, qa_name: qaName })
+      downloadBlob(res.data, `${selected.lob_name}_run${selected.id}_report.pdf`)
     } catch { alert('PDF failed. Run must have metrics.') }
     finally { setPdfLoading(false) }
   }
@@ -169,26 +169,15 @@ export default function Reports() {
                   </div>
                   <p className="text-sm text-gray-500 mt-1">API Performance Testing — Load &amp; Stress Test Report</p>
                 </div>
-                {/* Download button - top right, always visible */}
-                <div className="relative">
-                  <button onClick={() => setShowPdfOptions(s => !s)} disabled={pdfLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-bold rounded-xl hover:bg-teal-700 disabled:opacity-60 shadow-sm">
+                {/* Download button - top right */}
+                <div className="text-right">
+                  <button onClick={downloadPdf} disabled={pdfLoading}
+                    className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl shadow-sm disabled:opacity-60"
+                    style={{background:'#007B8A'}}>
                     <i className={`ti ${pdfLoading?'ti-loader-2 animate-spin':'ti-file-download'}`} />
                     {pdfLoading ? 'Generating...' : 'Download Report'}
-                    <i className="ti ti-chevron-down text-xs" />
                   </button>
-                  {showPdfOptions && (
-                    <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden w-52">
-                      <button onClick={() => downloadPdf('internal')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 border-b border-gray-100">
-                        <div className="font-medium text-gray-900">Internal</div>
-                        <div className="text-xs text-gray-400">Full technical detail</div>
-                      </button>
-                      <button onClick={() => downloadPdf('external')} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">
-                        <div className="font-medium text-gray-900">External</div>
-                        <div className="text-xs text-gray-400">Executive summary — for clients</div>
-                      </button>
-                    </div>
-                  )}
+                  <p className="text-xs text-gray-400 mt-1.5 italic">Please find more details in the report</p>
                 </div>
               </div>
               <div className="grid grid-cols-4 gap-3 text-xs">
@@ -278,7 +267,7 @@ export default function Reports() {
                 <div className="overflow-hidden rounded-xl border border-gray-100" style={{fontFamily:'Arial,Helvetica,sans-serif'}}>
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="bg-teal-600 text-white">
+                      <tr className="bg-[#0bacaa] text-white">
                         {['Method','Endpoint','Requests','p50','p90','p99','Errors','Status'].map(h => (
                           <th key={h} className={`py-2.5 px-3 font-medium ${h==='Endpoint'?'text-left':'text-center'}`}>{h}</th>
                         ))}
@@ -318,7 +307,7 @@ export default function Reports() {
                   ? <button onClick={() => setThreshEdit(true)} className="text-xs text-teal-600 border border-teal-200 rounded-lg px-3 py-1.5 hover:bg-teal-50 flex items-center gap-1"><i className="ti ti-edit" />Edit</button>
                   : <div className="flex gap-2">
                       <button onClick={() => setThreshEdit(false)} className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">Cancel</button>
-                      <button onClick={saveThresholds} disabled={threshSaving} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-60">{threshSaving?'Saving...':'Save'}</button>
+                      <button onClick={saveThresholds} disabled={threshSaving} className="text-xs bg-[#0bacaa] text-white px-3 py-1.5 rounded-lg hover:bg-[#099e9c] disabled:opacity-60">{threshSaving?'Saving...':'Save'}</button>
                     </div>
                 }
               </div>
@@ -402,7 +391,7 @@ export default function Reports() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-teal-600 text-white">
+              <tr className="bg-[#0bacaa] text-white">
                 {['Run','Date','LOB','Env','Tool','Errors %',''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-medium">{h}</th>
                 ))}

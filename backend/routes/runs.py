@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
@@ -433,3 +433,127 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.post("/run/jmx-upload")
+async def run_jmx_upload(
+    file: UploadFile = File(...),
+    iterations: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Run an uploaded JMX file directly — no LOB needed, auth is inside the JMX."""
+    import json as _json
+    iter_configs = _json.loads(iterations)
+
+    # Save uploaded JMX to temp file
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.jmx', delete=False) as f:
+        content = await file.read()
+        f.write(content)
+        jmx_path = f.name
+
+    results = []
+    overall_status = 'done'
+
+    for i, cfg in enumerate(iter_configs, 1):
+        vus      = int(cfg.get('virtual_users', 10))
+        duration = int(cfg.get('duration_seconds', 60))
+        ramp     = int(cfg.get('ramp_up_seconds', 10))
+
+        # Patch VUs and duration into JMX via temp copy
+        patched_path = jmx_path.replace('.jmx', f'_iter{i}.jmx')
+        with open(jmx_path, 'r', encoding='utf-8', errors='replace') as f:
+            jmx_content = f.read()
+
+        # Replace common JMeter thread count and duration properties
+        import re
+        jmx_content = re.sub(r'(<stringProp name="ThreadGroup\.num_threads">)\d+(</stringProp>)', f'\\g<1>{vus}\\2', jmx_content)
+        jmx_content = re.sub(r'(<stringProp name="ThreadGroup\.duration">)\d+(</stringProp>)', f'\\g<1>{duration}\\2', jmx_content)
+        jmx_content = re.sub(r'(<stringProp name="ThreadGroup\.ramp_time">)\d+(</stringProp>)', f'\\g<1>{ramp}\\2', jmx_content)
+
+        with open(patched_path, 'w', encoding='utf-8') as f:
+            f.write(jmx_content)
+
+        try:
+            result_dir = tempfile.mkdtemp()
+            result_jtl = os.path.join(result_dir, 'result.jtl')
+
+            proc = subprocess.run(
+                ['jmeter', '-n', '-t', patched_path, '-l', result_jtl],
+                capture_output=True, text=True,
+                timeout=duration + 120
+            )
+
+            metrics = _parse_jtl(result_jtl) if os.path.exists(result_jtl) else {}
+            status = 'done' if proc.returncode == 0 else 'failed'
+
+        except Exception as e:
+            metrics = {'error': str(e)}
+            status = 'failed'
+            overall_status = 'failed'
+        finally:
+            if os.path.exists(patched_path):
+                os.unlink(patched_path)
+
+        results.append({
+            'iteration': i,
+            'virtual_users': vus,
+            'duration_seconds': duration,
+            'status': status,
+            'metrics': metrics,
+        })
+
+    # Cleanup
+    if os.path.exists(jmx_path):
+        os.unlink(jmx_path)
+
+    report = {
+        'tool': 'jmeter',
+        'source': 'upload',
+        'filename': file.filename,
+        'total_iterations': len(results),
+        'iterations': results,
+    }
+
+    return {
+        'status': overall_status,
+        'report_json': json.dumps(report),
+        'total_iterations': len(results),
+    }
+
+
+def _parse_jtl(jtl_path: str) -> dict:
+    """Parse JMeter JTL result file into metrics dict."""
+    import csv
+    latencies = []
+    errors = 0
+    total = 0
+    try:
+        with open(jtl_path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                total += 1
+                elapsed = int(row.get('elapsed', 0))
+                latencies.append(elapsed)
+                rc = row.get('responseCode', '200')
+                if not rc.startswith('2') and not rc.startswith('3'):
+                    errors += 1
+    except Exception:
+        return {}
+
+    def pct(data, p):
+        if not data: return 0
+        s = sorted(data)
+        return s[int(len(s) * p / 100)]
+
+    return {
+        'total_requests': total,
+        'errors': errors,
+        'error_rate_pct': round(errors/total*100, 2) if total else 0,
+        'avg_ms': round(sum(latencies)/len(latencies)) if latencies else 0,
+        'min_ms': min(latencies) if latencies else 0,
+        'max_ms': max(latencies) if latencies else 0,
+        'p50_ms': pct(latencies, 50),
+        'p90_ms': pct(latencies, 90),
+        'p99_ms': pct(latencies, 99),
+        'rps': round(total / (sum(latencies)/1000/len(latencies) if latencies else 1), 2),
+    }

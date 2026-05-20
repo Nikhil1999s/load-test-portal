@@ -172,6 +172,38 @@ export default function LOBs() {
 
   return (
     <div className="p-8 max-w-6xl">
+      {/* Overview banner */}
+      <div className="rounded-2xl p-5 mb-6 text-white" style={{background:'linear-gradient(135deg, #0bacaa 0%, #005F6B 100%)'}}>
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <img src="/logo.png" alt="salescode.ai" className="h-5 brightness-0 invert" onError={e=>e.target.style.display='none'} />
+            </div>
+            <h2 className="text-lg font-bold mb-1">Load & Stress Testing Portal</h2>
+            <p className="text-white/80 text-sm max-w-xl">
+              Automated API load testing for all Lines of Business. Add your LOBs, map APIs, configure tests and generate professional reports — without writing a single line of test script.
+            </p>
+          </div>
+          <a href="/docs" className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+            <i className="ti ti-book text-sm" /> View documentation
+          </a>
+        </div>
+        <div className="grid grid-cols-5 gap-3 mt-4">
+          {[
+            { icon: 'ti-building', label: 'Lines of business', desc: 'Add & manage LOBs' },
+            { icon: 'ti-api', label: 'API library', desc: 'Master API catalog' },
+            { icon: 'ti-arrows-exchange', label: 'LOB ↔ API mapping', desc: 'Configure per-LOB APIs' },
+            { icon: 'ti-player-play', label: 'Test config', desc: 'Run load tests' },
+            { icon: 'ti-chart-bar', label: 'Reports', desc: 'PDF with charts' },
+          ].map((s, i) => (
+            <div key={i} className="bg-white/10 rounded-xl p-3 text-center">
+              <i className={`ti ${s.icon} text-xl block mb-1`} />
+              <div className="text-xs font-medium">{s.label}</div>
+              <div className="text-white/60 text-xs">{s.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Lines of business</h1>

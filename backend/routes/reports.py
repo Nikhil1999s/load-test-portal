@@ -14,7 +14,6 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 class PDFRequest(BaseModel):
     run_id: int
-    version: str = "internal"
     custom_obs: Optional[str] = None
     qa_name: Optional[str] = None
 
@@ -101,8 +100,8 @@ def download_pdf(payload: PDFRequest, db: Session = Depends(get_db)):
     buf = generate_pdf(run, lob, metrics, threshold,
                        custom_obs=payload.custom_obs,
                        qa_name=payload.qa_name,
-                       version=payload.version)
+                       version='internal')
     slug = lob.name.lower().replace(' ', '_')
-    filename = f"{slug}_run{run.id}_{payload.version}.pdf"
+    filename = f"{slug}_run{run.id}_report.pdf"
     return Response(content=buf.read(), media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename={filename}"})
