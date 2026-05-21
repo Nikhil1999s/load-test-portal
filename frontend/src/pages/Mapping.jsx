@@ -167,6 +167,24 @@ export default function Mapping() {
                 <span className="text-gray-500">
                   <span className="font-medium text-gray-900">{enabledCount}</span> of {mappings.length} APIs enabled
                 </span>
+                <div className="flex gap-2 ml-auto">
+                  <button onClick={() => setMappings(prev => prev.map(m => ({ ...m, enabled: true })))}
+                    className="text-xs px-3 py-1 border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50">
+                    Select all
+                  </button>
+                  <button onClick={() => setMappings(prev => prev.map(m => ({ ...m, enabled: false })))}
+                    className="text-xs px-3 py-1 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50">
+                    Deselect all
+                  </button>
+                  <button onClick={() => setMappings(prev => prev.map(m => ({ ...m, enabled: m.api_method === 'GET' })))}
+                    className="text-xs px-3 py-1 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50">
+                    GET only
+                  </button>
+                  <button onClick={() => setMappings(prev => prev.map(m => ({ ...m, enabled: ['POST','PUT','PATCH'].includes(m.api_method) })))}
+                    className="text-xs px-3 py-1 border border-green-200 text-green-600 rounded-lg hover:bg-green-50">
+                    POST only
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
@@ -202,7 +220,9 @@ export default function Mapping() {
                               {m.api_method}
                             </span>
                           </td>
-                          <td className="px-4 py-3 font-mono text-xs text-gray-500">{m.api_endpoint}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-500 max-w-xs">
+                            <div className="truncate" title={m.api_endpoint}>{m.api_endpoint}</div>
+                          </td>
                           <td className="px-4 py-3">
                             {m.enabled && NEEDS_BODY.includes(m.api_method) ? (
                               <button

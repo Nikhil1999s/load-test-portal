@@ -38,34 +38,63 @@ export default function APIs() {
 
   const parseCurl = (curlText) => {
     try {
-      // Extract URL
-      const urlMatch = curlText.match(/curl\s+['"]?(https?:\/\/[^\s'"\\]+)['"]?/i) ||
-                       curlText.match(/curl\s+[^-\s]*\s+['"]?(https?:\/\/[^\s'"\\]+)['"]?/i)
-      if (!urlMatch) return null
-      const fullUrl = urlMatch[1]
-      const url = new URL(fullUrl)
+      // Clean up the curl command - remove line continuations
+      const cleaned = curlText.replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim()
+
+      // Extract URL - handle single quotes, double quotes, or no quotes
+      const urlPatterns = [
+        /curl\s+--location\s+'([^']+)'/i,
+        /curl\s+--location\s+"([^"]+)"/i,
+        /curl\s+'([^']+)'/i,
+        /curl\s+"([^"]+)"/i,
+        /curl\s+(https?:\/\/\S+)/i,
+      ]
+      let fullUrl = null
+      for (const pattern of urlPatterns) {
+        const m = cleaned.match(pattern)
+        if (m) { fullUrl = m[1]; break }
+      }
+      if (!fullUrl) return null
+
+      // Parse URL safely
+      let url
+      try { url = new URL(fullUrl) }
+      catch { 
+        // Try encoding special chars
+        try { url = new URL(fullUrl.replace(/'/g, '%27').replace(/\[/g, '%5B').replace(/\]/g, '%5D')) }
+        catch { return null }
+      }
+
       const baseUrl = url.origin
       const endpoint = url.pathname + url.search
 
       // Extract method
       let method = 'GET'
-      const methodMatch = curlText.match(/-X\s+([A-Z]+)/i)
+      const methodMatch = cleaned.match(/-X\s+([A-Z]+)/i) || cleaned.match(/--request\s+([A-Z]+)/i)
       if (methodMatch) method = methodMatch[1].toUpperCase()
-      if (curlText.includes('--data') || curlText.includes('-d ')) method = method === 'GET' ? 'POST' : method
+      if (cleaned.includes('--data') || cleaned.match(/\s-d\s/)) method = method === 'GET' ? 'POST' : method
 
       // Extract body
       let body = ''
-      const bodyMatch = curlText.match(/--data(?:-raw)?\s+'([^']+)'/) ||
-                        curlText.match(/--data(?:-raw)?\s+"([^"]+)"/) ||
-                        curlText.match(/-d\s+'([^']+)'/) ||
-                        curlText.match(/-d\s+"([^"]+)"/)
-      if (bodyMatch) body = bodyMatch[1]
+      const bodyPatterns = [
+        /--data-raw\s+'([^']+)'/,
+        /--data-raw\s+"([^"]+)"/,
+        /--data\s+'([^']+)'/,
+        /--data\s+"([^"]+)"/,
+        /-d\s+'([^']+)'/,
+        /-d\s+"([^"]+)"/,
+      ]
+      for (const pattern of bodyPatterns) {
+        const m = cleaned.match(pattern)
+        if (m) { body = m[1]; break }
+      }
 
-      // Generate name from endpoint
+      // Generate name from last path segment
       const parts = url.pathname.split('/').filter(Boolean)
-      const name = parts[parts.length - 1]
-        ? parts[parts.length - 1].charAt(0).toUpperCase() + parts[parts.length - 1].slice(1)
-        : 'API'
+      const lastPart = parts[parts.length - 1] || 'API'
+      const name = lastPart.charAt(0).toUpperCase() + lastPart.slice(1)
+
+      const knownBases = ['https://demo.salescode.ai','https://uat.salescode.ai','https://prod.salescode.ai']
 
       return {
         name,
@@ -73,7 +102,7 @@ export default function APIs() {
         endpoint,
         description: '',
         default_body: body,
-        base_url_override: baseUrl === 'https://demo.salescode.ai' || baseUrl === 'https://uat.salescode.ai' ? '' : baseUrl,
+        base_url_override: knownBases.includes(baseUrl) ? '' : baseUrl,
       }
     } catch { return null }
   }
@@ -239,7 +268,9 @@ export default function APIs() {
                         {a.method}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{a.endpoint}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600 max-w-xs">
+                      <div className="truncate" title={a.endpoint}>{a.endpoint}</div>
+                    </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {a.base_url_override
                         ? <span className="font-mono text-indigo-500 text-xs" title={a.base_url_override}>Custom URL</span>
