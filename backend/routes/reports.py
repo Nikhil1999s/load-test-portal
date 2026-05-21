@@ -20,7 +20,7 @@ class PDFRequest(BaseModel):
 
 @router.get("/")
 def list_reports(lob_id: Optional[int] = None, db: Session = Depends(get_db)):
-    query = db.query(models.TestRun).filter(models.TestRun.status == "done")
+    query = db.query(models.TestRun).filter(models.TestRun.status.in_(["done", "failed"]))
     if lob_id:
         query = query.filter(models.TestRun.lob_id == lob_id)
     runs = query.order_by(models.TestRun.created_at.desc()).limit(100).all()

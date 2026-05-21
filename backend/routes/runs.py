@@ -24,7 +24,8 @@ class RunConfig(BaseModel):
     duration_seconds: int = 60
     ramp_up_seconds: int = 10
     iterations: Optional[int] = None
-    api_filter: str = "all"  # all | get | post
+    api_filter: str = "all"
+    notify_email: Optional[str] = None
 
 
 class RunResponse(BaseModel):
@@ -312,6 +313,32 @@ def run_k6(config: RunConfig, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(run)
+
+    # Send email notification if requested
+    if config.notify_email and run.report_json:
+        try:
+            from utils.email_sender import send_report_email
+            from generators.pdf_generator import generate_pdf
+            from routes.thresholds import get_threshold
+            r = json.loads(run.report_json)
+            m = r.get('metrics', {})
+            thresh = get_threshold(lob.id, db)
+            p99_pass = m.get('p99_ms', 0) <= thresh.p99_max_ms
+            err_pass = m.get('error_rate_pct', 100) <= thresh.error_rate_max_pct
+            verdict = 'PASS ✓' if (p99_pass and err_pass) else 'FAIL ✗'
+            pdf_buf = generate_pdf(run, lob, m, thresh, version='internal')
+            send_report_email(
+                to_email=config.notify_email,
+                lob_name=lob.name,
+                environment=lob.environment,
+                metrics=m,
+                pdf_buf=pdf_buf,
+                run_id=run.id,
+                verdict=verdict,
+            )
+        except Exception as e:
+            print(f"[email] Failed to send notification: {e}")
+
     return run
 
 

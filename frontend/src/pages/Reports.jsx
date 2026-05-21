@@ -468,7 +468,7 @@ export default function Reports() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#0bacaa] text-white">
-                {['Run','Date','LOB','Env','Tool','Errors %',''].map(h => (
+                {['Run','Date','LOB','Env','Tool','Errors %','Result',''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-medium">{h}</th>
                 ))}
               </tr>
@@ -486,6 +486,14 @@ export default function Reports() {
                   <td className="px-4 py-3 text-xs uppercase font-medium text-gray-600">{run.tool}</td>
                   <td className={`px-4 py-3 text-xs font-semibold ${run.error_rate_pct>0?'text-red-600':'text-green-600'}`}>
                     {run.error_rate_pct?.toFixed(1)??'—'}%
+                  </td>
+                  <td className="px-4 py-3">
+                    {run.status === 'failed'
+                      ? <span className="text-xs font-semibold bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full">Failed</span>
+                      : run.error_rate_pct > 0
+                        ? <span className="text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">Errors</span>
+                        : <span className="text-xs font-semibold bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">Pass</span>
+                    }
                   </td>
                   <td className="px-4 py-3">
                     <span className="flex items-center gap-1 text-xs text-teal-600 font-medium">

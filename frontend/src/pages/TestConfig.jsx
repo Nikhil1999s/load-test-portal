@@ -35,6 +35,9 @@ export default function TestConfig() {
   ])
   const [stopOnFailure, setStopOnFailure] = useState(true)
   const [running, setRunning] = useState(false)
+  const [notifyEmail, setNotifyEmail] = useState('')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
   const [runResult, setRunResult] = useState(null)
   const [suiteResult, setSuiteResult] = useState(null)
   const [error, setError] = useState(null)
@@ -72,6 +75,9 @@ export default function TestConfig() {
     ramp_up_seconds: Number(config.ramp_up_seconds),
     iterations: config.iterations ? Number(config.iterations) : null,
     api_filter: apiFilter,
+    notify_email: notifyEmail.trim() || null,
+    email_subject: emailSubject.trim() || null,
+    email_body: emailBody.trim() || null,
   })
 
   const startRun = async (type) => {
@@ -514,6 +520,35 @@ export default function TestConfig() {
               <div className="bg-white border border-gray-100 rounded-xl p-5">
                 <h2 className="text-sm font-medium text-gray-900 mb-4">Actions</h2>
                 {!selectedLob && <p className="text-xs text-gray-400 italic mb-4">Select a LOB to enable actions</p>}
+
+                {/* Email notification - WOW section */}
+                <div className="mt-4 rounded-xl overflow-hidden border-2 border-teal-300"
+                     style={{background:'linear-gradient(135deg, #E0F7FA 0%, #F0FAFA 100%)'}}>
+                  <div className="px-4 py-3 flex items-center gap-2" style={{background:'#0bacaa'}}>
+                    <i className="ti ti-mail text-white text-base" />
+                    <span className="text-white text-sm font-bold">Auto Email Report</span>
+                    <span className="ml-auto text-xs bg-white/20 text-white px-2 py-0.5 rounded-full">NEW</span>
+                  </div>
+                  <div className="px-4 py-3">
+                    <p className="text-xs text-teal-700 mb-2">
+                      📧 Enter email — get the full PDF report automatically when test completes!
+                    </p>
+                    <input
+                      type="text"
+                      value={notifyEmail}
+                      onChange={e => setNotifyEmail(e.target.value)}
+                      placeholder="email1@co.com, email2@co.com"
+                      className="text-sm border-teal-200 focus:ring-teal-400"
+                    />
+                    {notifyEmail && (
+                      <div className="mt-2 text-xs text-teal-600 bg-white rounded-lg px-3 py-2 border border-teal-100">
+                        <p>✓ <span className="font-medium">Subject:</span> Load Test Report — {selectedLob?.name || 'LOB Name'}</p>
+                        <p className="mt-0.5">✓ PDF report attached automatically</p>
+                        <p className="mt-0.5">✓ Sent from QA Engineering Team</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="space-y-2">
                   {mode === 'single' ? (
                     <>
@@ -571,7 +606,6 @@ export default function TestConfig() {
             </div>
           )}
 
-          {/* Single run result */}
           {runResult && (
             <div className={`mt-5 border rounded-xl p-5 ${runResult.status==='done'?'bg-green-50 border-green-200':'bg-red-50 border-red-200'}`}>
               <div className="flex items-center gap-2 mb-3">
@@ -583,13 +617,51 @@ export default function TestConfig() {
                 const m = r.metrics || {}
                 if (!m.total_requests) return null
                 return (
-                  <div className="grid grid-cols-4 gap-2">
-                    {[['Total requests',(m.total_requests||0).toLocaleString()],['Avg response',`${m.avg_ms||0}ms`],['p99',`${m.p99_ms||0}ms`],['Error rate',`${(m.error_rate_pct||0).toFixed(1)}%`]].map(([l,v]) => (
-                      <div key={l} className="bg-white border border-gray-200 rounded-lg p-2 text-center">
-                        <div className="text-base font-semibold text-gray-900">{v}</div>
-                        <div className="text-xs text-gray-400 mt-0.5">{l}</div>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-4 gap-2">
+                      {[['Total requests',(m.total_requests||0).toLocaleString()],['Avg response',`${m.avg_ms||0}ms`],['p99',`${m.p99_ms||0}ms`],['Error rate',`${(m.error_rate_pct||0).toFixed(1)}%`]].map(([l,v]) => (
+                        <div key={l} className="bg-white border border-gray-200 rounded-lg p-2 text-center">
+                          <div className="text-base font-semibold text-gray-900">{v}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">{l}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Error breakdown */}
+                    {m.status_summary && (m.status_summary['4xx'] > 0 || m.status_summary['5xx'] > 0) && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                        <p className="text-xs font-semibold text-red-700 mb-2"><i className="ti ti-alert-triangle mr-1" />Error breakdown:</p>
+                        <div className="flex gap-2 flex-wrap mb-2">
+                          {Object.entries(m.status_summary.details||{}).filter(([code]) => !code.startsWith('2')).map(([code,count]) => (
+                            <span key={code} className="text-xs font-mono font-bold bg-red-100 text-red-700 px-2 py-1 rounded-lg">
+                              HTTP {code} × {count}
+                            </span>
+                          ))}
+                        </div>
+                        {m.error_samples && m.error_samples.length > 0 && (
+                          <div>
+                            <p className="text-xs text-red-600 font-medium mb-1">Failed endpoints:</p>
+                            {[...new Set(m.error_samples.map(s => s.endpoint))].map(ep => {
+                              const sample = m.error_samples.find(s => s.endpoint === ep)
+                              return (
+                                <div key={ep} className="text-xs text-red-700 font-mono bg-white rounded px-2 py-1 mb-1">
+                                  {sample.method} {ep} → <span className="font-bold">{sample.status_code} {sample.status_text}</span>
+                                </div>
+                              )
+                            })}
+                            {/* Smart hint */}
+                            <p className="text-xs text-amber-700 mt-2 bg-amber-50 rounded px-2 py-1">
+                              {m.error_samples[0]?.status_code === 401 && '💡 HTTP 401 — Token expired. Refresh token in Lines of Business.'}
+                              {m.error_samples[0]?.status_code === 500 && '💡 HTTP 500 — Server error on the API side. Check if the request body/params are correct for this LOB.'}
+                              {m.error_samples[0]?.status_code === 403 && '💡 HTTP 403 — Forbidden. Check LOB permissions.'}
+                              {m.error_samples[0]?.status_code === 404 && '💡 HTTP 404 — Endpoint not found. Verify the API URL.'}
+                              {m.error_samples[0]?.status_code === 429 && '💡 HTTP 429 — Rate limited. Reduce VUs.'}
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )}
+                    <p className="text-xs text-gray-400">View full report in Reports → Run #{runResult.id}</p>
                   </div>
                 )
               })()}

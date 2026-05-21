@@ -94,15 +94,15 @@ def _std_table(data, col_widths, row_bgs=None, header_color=TEAL, font_size=9, r
 
 def _pass_fail(val):
     if val in ('PASS','✓','OK','PASS ✓'):
-        return Paragraph('<b>PASS ✓</b>', S('pf', fontSize=9, fontName=FONT_B, textColor=GREEN, alignment=TA_CENTER))
+        return Paragraph('<b>PASS</b>', S('pf', fontSize=9, fontName=FONT_B, textColor=GREEN, alignment=TA_CENTER))
     if val in ('FAIL','✗','FAIL ✗'):
-        return Paragraph('<b>FAIL ✗</b>', S('pf2', fontSize=9, fontName=FONT_B, textColor=RED, alignment=TA_CENTER))
+        return Paragraph('<b>FAIL</b>', S('pf2', fontSize=9, fontName=FONT_B, textColor=RED, alignment=TA_CENTER))
     if val in ('WARN','WARNING'):
         return Paragraph('<b>WARN</b>', S('pf3', fontSize=9, fontName=FONT_B, textColor=AMBER, alignment=TA_CENTER))
     return Paragraph(str(val), S('pf4', fontSize=9, alignment=TA_CENTER))
 
 def _verdict_cell(passed):
-    return _pass_fail('PASS ✓' if passed else 'FAIL ✗')
+    return _pass_fail('PASS' if passed else 'FAIL')
 
 def _build_chart(by_endpoint, thresholds):
     endpoints = list(by_endpoint.keys())
@@ -211,7 +211,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     # Overall verdict banner
     v_color = GREEN if overall else RED
     v_bg    = GREEN_LT if overall else RED_LT
-    vt = Table([[Paragraph(f'<b>Overall Result: {"PASS ✓" if overall else "FAIL ✗"}</b>',
+    vt = Table([[Paragraph(f'<b>Overall Result: {"PASS" if overall else "FAIL"}</b>',
         S('vv', fontSize=12, fontName=FONT_B, textColor=v_color, alignment=TA_CENTER))]],
         colWidths=[PAGE_W])
     vt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),v_bg),('GRID',(0,0),(-1,-1),0.5,v_color),
@@ -299,24 +299,27 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
         rt_data = [_header_row(['Endpoint', 'Method', 'Requests', 'Avg (ms)', 'p90 (ms)', 'p99 (ms)', 'Max (ms)', 'SLA'])]
         for ep, d in by_ep.items():
             ep_pass = d.get('p99_ms',0) <= thresholds.p99_max_ms
-            short_ep = ep if len(ep)<=45 else ep[:43]+'..'
+            short_ep = ep if len(ep)<=40 else ep[:38]+'..'
             rt_data.append([
-                Paragraph(f'<font size="8" name="Courier">{short_ep}</font>', S('ep', fontSize=8, fontName='Courier')),
+                Paragraph(short_ep, S('ep', fontSize=9, alignment=TA_CENTER)),
                 Paragraph(d.get('method','GET'), S('m', fontSize=9, alignment=TA_CENTER)),
-                str(d.get('count',0)),
-                str(d.get('p50_ms',0)),
-                str(d.get('p90_ms',0)),
-                str(d.get('p99_ms',0)),
-                str(metrics.get('max_ms',0)),
-                _verdict_cell(ep_pass),
+                Paragraph(str(d.get('count',0)), S('c', fontSize=9, alignment=TA_CENTER)),
+                Paragraph(str(d.get('p50_ms',0)), S('a', fontSize=9, alignment=TA_CENTER)),
+                Paragraph(str(d.get('p90_ms',0)), S('p9', fontSize=9, alignment=TA_CENTER)),
+                Paragraph(str(d.get('p99_ms',0)), S('p99', fontSize=9, alignment=TA_CENTER)),
+                Paragraph(str(metrics.get('max_ms',0)), S('mx', fontSize=9, alignment=TA_CENTER)),
+                Paragraph('PASS' if ep_pass else 'FAIL',
+                    S('sla', fontSize=9, fontName=FONT_B, alignment=TA_CENTER,
+                      textColor=GREEN if ep_pass else RED)),
             ])
         rt_t = Table(rt_data, colWidths=[60*mm,14*mm,18*mm,16*mm,16*mm,16*mm,16*mm,18*mm], repeatRows=1)
         rt_style = [
             ('BACKGROUND',(0,0),(-1,0),TEAL),
             ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,GRAY_LT]),
             ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
-            ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
-            ('LEFTPADDING',(0,0),(-1,-1),5),('ALIGN',(2,0),(-1,-1),'CENTER'),
+            ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('ALIGN',(0,0),(-1,-1),'CENTER'),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
         ]
         rt_t.setStyle(TableStyle(rt_style))
         story.append(rt_t)
@@ -340,18 +343,70 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     story.append(te_t)
     story.append(Spacer(1,12))
 
-    # ── 4. RESPONSE TIME CHART ────────────────────────────────
-    story.append(_section('Response Time Chart (p50 / p90 / p99 per Endpoint)', num=4,
+    # ── 4. COLOR-CODED PERFORMANCE TABLE ─────────────────────
+    story.append(PageBreak())
+    story.append(_section('Response Time Analysis — Per Endpoint', num=4,
                            color=AMBER, bg=AMBER_LT))
     story.append(Spacer(1,6))
     story.append(Paragraph(
-        'Bar chart showing response time percentiles per tested endpoint. '
-        'Dashed red line marks the p99 threshold.',
+        'Color key:  Green = fast (below 70% of threshold)  ·  Amber = moderate (70–100%)  ·  Red = exceeds threshold',
         S('cc', fontSize=8, textColor=GRAY, leading=12)))
-    story.append(Spacer(1,6))
-    chart = _build_chart(by_ep, thresholds)
-    if chart:
-        story.append(chart)
+    story.append(Spacer(1,8))
+
+    if by_ep:
+        def _lat_para(val, threshold):
+            n = int(val)
+            if n > threshold:
+                bg, col = RED_LT, RED
+            elif n > threshold * 0.7:
+                bg, col = colors.HexColor('#FFF8E1'), AMBER
+            else:
+                bg, col = GREEN_LT, GREEN
+            return Paragraph(f'{val}ms', S('lp', fontSize=9, fontName=FONT_B,
+                             textColor=col, alignment=TA_CENTER)), bg
+
+        perf_data = [_header_row(['Endpoint', 'Method', 'Requests', 'p50', 'p90', 'p99', 'Max', 'SLA'])]
+        perf_styles = [
+            ('BACKGROUND',(0,0),(-1,0),TEAL),
+            ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+            ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('ALIGN',(0,0),(-1,-1),'CENTER'),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ]
+
+        for ri, (ep, d) in enumerate(by_ep.items(), 1):
+            ep_pass = d.get('p99_ms',0) <= thresholds.p99_max_ms
+            short_ep = ep if len(ep)<=38 else ep[:36]+'..'
+            row_bg = WHITE if ri % 2 == 1 else GRAY_LT
+
+            p50_p, p50_bg = _lat_para(d.get('p50_ms',0), thresholds.p99_max_ms)
+            p90_p, p90_bg = _lat_para(d.get('p90_ms',0), thresholds.p90_max_ms)
+            p99_p, p99_bg = _lat_para(d.get('p99_ms',0), thresholds.p99_max_ms)
+            max_p, max_bg = _lat_para(metrics.get('max_ms',0), thresholds.p99_max_ms)
+
+            perf_data.append([
+                Paragraph(short_ep, S('ep2', fontSize=9, alignment=TA_CENTER)),
+                Paragraph(d.get('method','GET'), S('mt', fontSize=9, alignment=TA_CENTER,
+                    textColor=NAVY if d.get('method','GET')=='GET' else GREEN)),
+                Paragraph(str(d.get('count',0)), S('ct', fontSize=9, alignment=TA_CENTER)),
+                p50_p, p90_p, p99_p, max_p,
+                Paragraph('PASS' if ep_pass else 'FAIL',
+                    S('sla2', fontSize=9, fontName=FONT_B, alignment=TA_CENTER,
+                      textColor=GREEN if ep_pass else RED)),
+            ])
+            # Apply per-cell background colors
+            perf_styles.append(('BACKGROUND',(0,ri),(0,ri),row_bg))
+            perf_styles.append(('BACKGROUND',(1,ri),(1,ri),row_bg))
+            perf_styles.append(('BACKGROUND',(2,ri),(2,ri),row_bg))
+            perf_styles.append(('BACKGROUND',(3,ri),(3,ri),p50_bg))
+            perf_styles.append(('BACKGROUND',(4,ri),(4,ri),p90_bg))
+            perf_styles.append(('BACKGROUND',(5,ri),(5,ri),p99_bg))
+            perf_styles.append(('BACKGROUND',(6,ri),(6,ri),max_bg))
+            perf_styles.append(('BACKGROUND',(7,ri),(7,ri),GREEN_LT if ep_pass else RED_LT))
+
+        perf_t = Table(perf_data, colWidths=[58*mm,14*mm,17*mm,16*mm,16*mm,16*mm,16*mm,21*mm], repeatRows=1)
+        perf_t.setStyle(TableStyle(perf_styles))
+        story.append(perf_t)
     story.append(Spacer(1,12))
 
     # ── 5. THRESHOLD COMPARISON ───────────────────────────────
