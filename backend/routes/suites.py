@@ -26,6 +26,8 @@ class SuiteConfig(BaseModel):
     lob_id: int
     tool: str = "k6"
     iterations: list[IterationConfig]
+    stop_on_failure: bool = True       # stop if error rate > 50%
+    error_threshold_pct: float = 50.0  # stop threshold
 
 
 class SuiteResponse(BaseModel):
@@ -123,6 +125,17 @@ def run_suite(config: SuiteConfig, db: Session = Depends(get_db)):
             "status": run.status,
             "metrics": metrics,
         })
+
+        # Stop on high error rate
+        err_rate = metrics.get("error_rate_pct", 0)
+        if config.stop_on_failure and err_rate >= config.error_threshold_pct and i < len(config.iterations):
+            iteration_results.append({
+                "iteration": "STOPPED",
+                "reason": f"Stopped after iteration {i} — error rate {err_rate:.1f}% exceeded {config.error_threshold_pct}% threshold",
+                "remaining": len(config.iterations) - i,
+            })
+            overall_status = "failed"
+            break
 
     suite_report = {
         "lob": lob.name,

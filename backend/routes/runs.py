@@ -124,6 +124,8 @@ def _parse_k6_output(stdout: str) -> dict:
     """Parse k6 --out json=- output into metrics dict."""
     metrics = {}
     by_endpoint = {}
+    status_codes = {}   # track HTTP status code counts
+    error_samples = []  # collect sample error details
 
     for line in stdout.splitlines():
         line = line.strip()
@@ -147,21 +149,38 @@ def _parse_k6_output(stdout: str) -> dict:
             metrics[metric] = []
         metrics[metric].append(value)
 
+        # track HTTP status codes
+        if metric == "http_req_duration" and tags.get("status"):
+            status = tags.get("status", "0")
+            status_codes[status] = status_codes.get(status, 0) + 1
+
         # per-endpoint latency
         if metric == "http_req_duration" and name:
             ep = name.split("?")[0].split("//")[-1]
             ep = "/" + "/".join(ep.split("/")[1:]) if "/" in ep else ep
             method = tags.get("method", "GET").upper()
+            status = tags.get("status", "0")
             if ep not in by_endpoint:
-                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0, "method": method}
+                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0, "method": method, "status_codes": {}}
             by_endpoint[ep]["latencies"].append(value)
             by_endpoint[ep]["count"] += 1
+            # Track status codes per endpoint
+            by_endpoint[ep]["status_codes"][status] = by_endpoint[ep]["status_codes"].get(status, 0) + 1
+            # Collect error samples (4xx/5xx)
+            if status and status.startswith(('4','5')) and len(error_samples) < 10:
+                error_samples.append({
+                    "endpoint": ep,
+                    "method": method,
+                    "status_code": int(status),
+                    "status_text": _http_status_text(int(status)),
+                    "latency_ms": round(value),
+                })
 
         if metric == "http_req_failed" and name:
             ep = name.split("?")[0].split("//")[-1]
             ep = "/" + "/".join(ep.split("/")[1:]) if "/" in ep else ep
             if ep not in by_endpoint:
-                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0}
+                by_endpoint[ep] = {"latencies": [], "errors": 0, "count": 0, "status_codes": {}}
             if value == 1:
                 by_endpoint[ep]["errors"] += 1
 
@@ -175,12 +194,17 @@ def _parse_k6_output(stdout: str) -> dict:
     failed_vals = metrics.get("http_req_failed", [])
     total_req   = len(durations)
 
-    # http_req_failed is a rate metric (0 or 1 per request)
-    # Count actual failures — number of 1s, capped at total_req
     errors = min(int(sum(1 for v in failed_vals if v == 1)), total_req) if failed_vals else 0
+    total_time = sum(metrics.get("iteration_duration", [1000])) / 1000 or 1
 
-    # Calculate total time from actual duration span
-    total_time  = sum(metrics.get("iteration_duration", [1000])) / 1000 or 1
+    # Summarise status codes
+    status_summary = {
+        "2xx": sum(v for k,v in status_codes.items() if k.startswith('2')),
+        "3xx": sum(v for k,v in status_codes.items() if k.startswith('3')),
+        "4xx": sum(v for k,v in status_codes.items() if k.startswith('4')),
+        "5xx": sum(v for k,v in status_codes.items() if k.startswith('5')),
+        "details": status_codes,
+    }
 
     result = {
         "total_requests":   total_req,
@@ -193,19 +217,32 @@ def _parse_k6_output(stdout: str) -> dict:
         "min_ms":           round(min(durations)) if durations else 0,
         "max_ms":           round(max(durations)) if durations else 0,
         "rps":              round(total_req / total_time, 2),
+        "status_summary":   status_summary,
+        "error_samples":    error_samples,
         "by_endpoint":      {
             ep: {
-                "count":   d["count"],
-                "errors":  d["errors"],
-                "method":  d.get("method", "GET"),
-                "p50_ms":  pct(d["latencies"], 50),
-                "p90_ms":  pct(d["latencies"], 90),
-                "p99_ms":  pct(d["latencies"], 99),
+                "count":        d["count"],
+                "errors":       d["errors"],
+                "method":       d.get("method", "GET"),
+                "status_codes": d.get("status_codes", {}),
+                "p50_ms":       pct(d["latencies"], 50),
+                "p90_ms":       pct(d["latencies"], 90),
+                "p99_ms":       pct(d["latencies"], 99),
             }
             for ep, d in by_endpoint.items()
         }
     }
     return result
+
+
+def _http_status_text(code: int) -> str:
+    texts = {
+        400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
+        404: "Not Found", 405: "Method Not Allowed", 408: "Request Timeout",
+        429: "Too Many Requests", 500: "Internal Server Error",
+        502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout",
+    }
+    return texts.get(code, f"HTTP {code}")
 
 
 @router.post("/run/k6", response_model=RunResponse)

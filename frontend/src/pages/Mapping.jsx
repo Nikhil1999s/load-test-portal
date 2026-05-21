@@ -87,7 +87,6 @@ export default function Mapping() {
   }
 
   const enabledCount = mappings.filter(m => m.enabled).length
-  const totalWeight = mappings.filter(m => m.enabled).reduce((s, m) => s + m.weight, 0)
 
   return (
     <div className="p-8 max-w-6xl">
@@ -168,11 +167,6 @@ export default function Mapping() {
                 <span className="text-gray-500">
                   <span className="font-medium text-gray-900">{enabledCount}</span> of {mappings.length} APIs enabled
                 </span>
-                {enabledCount > 0 && (
-                  <span className={`text-xs px-2 py-0.5 rounded-md ${totalWeight === 100 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-                    Total weight: {totalWeight}% {totalWeight !== 100 && '(should be 100%)'}
-                  </span>
-                )}
               </div>
 
               <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
@@ -183,7 +177,7 @@ export default function Mapping() {
                       <th className="text-left px-4 py-3 text-gray-500 font-normal">API</th>
                       <th className="text-left px-4 py-3 text-gray-500 font-normal">Method</th>
                       <th className="text-left px-4 py-3 text-gray-500 font-normal">Endpoint</th>
-                      <th className="text-left px-4 py-3 text-gray-500 font-normal w-28">Weight %</th>
+                      
                       <th className="text-left px-4 py-3 text-gray-500 font-normal w-24">Body</th>
                     </tr>
                   </thead>
@@ -209,22 +203,6 @@ export default function Mapping() {
                             </span>
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-gray-500">{m.api_endpoint}</td>
-                          <td className="px-4 py-3">
-                            {m.enabled ? (
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="number"
-                                  min="1" max="100"
-                                  value={m.weight}
-                                  onChange={e => setWeight(m.api_id, e.target.value)}
-                                  className="w-16 text-xs text-center py-1"
-                                />
-                                <span className="text-gray-400 text-xs">%</span>
-                              </div>
-                            ) : (
-                              <span className="text-gray-300 text-xs">—</span>
-                            )}
-                          </td>
                           <td className="px-4 py-3">
                             {m.enabled && NEEDS_BODY.includes(m.api_method) ? (
                               <button

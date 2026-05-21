@@ -67,15 +67,17 @@ export default function LOBs() {
   const fetchLobNames = async (env) => {
     const url = ENV_URLS[env]
     setLobNamesLoading(true)
-    setLobNames([])
-    setHealthCheck(null)
+    // Don't clear lobNames immediately — prevents flicker
     try {
       const res = await lobsApi.healthcheck(url)
       if (res.data.lob_names && res.data.lob_names.length > 0) {
         setLobNames(res.data.lob_names.sort())
+      } else {
+        setLobNames([])
       }
       setHealthCheck(res.data)
     } catch (e) {
+      setLobNames([])
       setHealthCheck({ reachable: false, message: 'Failed to reach environment' })
     } finally {
       setLobNamesLoading(false)
@@ -84,7 +86,6 @@ export default function LOBs() {
 
   const handleEnvChange = (env) => {
     setForm(f => ({ ...f, env, lobSelection: '', useCustomLob: false, customLobName: '', useCustomUrl: false, customUrl: '' }))
-    setHealthCheck(null)
     fetchLobNames(env)
   }
 

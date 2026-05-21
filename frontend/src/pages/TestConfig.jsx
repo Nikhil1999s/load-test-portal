@@ -33,6 +33,7 @@ export default function TestConfig() {
     { virtual_users: 60, duration_seconds: 300, ramp_up_seconds: 120 },
     { virtual_users: 120, duration_seconds: 300, ramp_up_seconds: 120 },
   ])
+  const [stopOnFailure, setStopOnFailure] = useState(true)
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState(null)
   const [suiteResult, setSuiteResult] = useState(null)
@@ -99,6 +100,7 @@ export default function TestConfig() {
       try {
         const res = await suitesApi.run({
           lob_id: selectedLob.id, tool,
+          stop_on_failure: stopOnFailure,
           iterations: iterList.map(it => ({
             virtual_users: Number(it.virtual_users),
             duration_seconds: Number(it.duration_seconds),
@@ -113,7 +115,15 @@ export default function TestConfig() {
 
   const handlePreview = async () => {
     if (!selectedLob) return
-    try { const res = await runsApi.previewK6(buildPayload()); setPreview(res.data); setShowPreview(true) }
+    try {
+      const res = await runsApi.previewK6(buildPayload())
+      setPreview(res.data)
+      setShowPreview(true)
+      // Auto scroll to preview after render
+      setTimeout(() => {
+        document.getElementById('preview-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+    }
     catch (e) { setError(e.response?.data?.detail || 'Preview failed.') }
   }
 
@@ -432,6 +442,18 @@ export default function TestConfig() {
                   <button onClick={addIter} className="flex items-center gap-1.5 text-xs text-indigo-600 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50">
                     <i className="ti ti-plus" /> Add iteration
                   </button>
+
+                  {/* Stop on failure toggle */}
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                    <button onClick={() => setStopOnFailure(s => !s)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${stopOnFailure ? 'bg-indigo-600' : 'bg-gray-200'}`}>
+                      <span className="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"
+                        style={{transform: stopOnFailure ? 'translateX(18px)' : 'translateX(2px)'}} />
+                    </button>
+                    <span className="text-xs text-gray-600">
+                      Stop if error rate &gt; 50% <span className="text-gray-400">(prevents wasting time on broken token or server issues)</span>
+                    </span>
+                  </div>
                   <div className="flex items-center gap-1 mt-4 flex-wrap">
                     {iterList.map((it, i) => (
                       <div key={i} className="flex items-center gap-1">
@@ -526,12 +548,26 @@ export default function TestConfig() {
 
           {/* k6 preview */}
           {showPreview && preview && (
-            <div className="mt-5 bg-white border border-gray-100 rounded-xl p-5">
+            <div id="preview-section" className="mt-5 bg-white border-2 border-indigo-200 rounded-xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-medium">k6 script preview</h2>
-                <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600"><i className="ti ti-x" /></button>
+                <div className="flex items-center gap-2">
+                  <i className="ti ti-code text-indigo-500" />
+                  <h2 className="text-sm font-medium text-gray-900">k6 script preview</h2>
+                  <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">↓ Scroll down to see</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => {
+                    navigator.clipboard.writeText(preview)
+                    alert('Script copied to clipboard!')
+                  }} className="flex items-center gap-1.5 text-xs text-indigo-600 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50">
+                    <i className="ti ti-copy" /> Copy script
+                  </button>
+                  <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <i className="ti ti-x" />
+                  </button>
+                </div>
               </div>
-              <pre className="text-xs font-mono bg-gray-50 border border-gray-100 rounded-lg p-4 overflow-x-auto text-gray-700 max-h-80">{preview}</pre>
+              <pre className="text-xs font-mono bg-gray-900 text-green-400 border border-gray-200 rounded-xl p-4 overflow-x-auto max-h-96 leading-relaxed">{preview}</pre>
             </div>
           )}
 
@@ -580,6 +616,13 @@ export default function TestConfig() {
                       </tr></thead>
                       <tbody>
                         {r.iterations.map((it, i) => {
+                          if (it.iteration === 'STOPPED') return (
+                            <tr key="stopped" className="bg-amber-50">
+                              <td colSpan="8" className="py-3 px-4 text-center text-xs text-amber-700 font-medium">
+                                <i className="ti ti-alert-triangle mr-1" />{it.reason}
+                              </td>
+                            </tr>
+                          )
                           const m = it.metrics || {}
                           return (
                             <tr key={i} className={i%2===0?'bg-white':'bg-gray-50'}>

@@ -46,6 +46,11 @@ function InfoTooltip({ text }) {
   )
 }
 
+function _statusText(code) {
+  const t = {400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',405:'Method Not Allowed',408:'Timeout',429:'Rate Limited',500:'Server Error',502:'Bad Gateway',503:'Unavailable',504:'Gateway Timeout'}
+  return t[code] || `HTTP ${code}`
+}
+
 function PassBadge({ pass }) {
   return pass ? (
     <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-green-50 text-green-700 border-2 border-green-400 px-3 py-1 rounded-full">
@@ -260,7 +265,78 @@ export default function Reports() {
               </div>
             </div>
 
-            {/* Per-endpoint */}
+            {/* Error details — only shown when errors > 0 */}
+            {has && (m.error_rate_pct||0) > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-red-800 mb-4 flex items-center gap-2">
+                  <i className="ti ti-alert-triangle text-red-600" />
+                  Error Analysis
+                  <span className="ml-auto text-xs font-normal text-red-500">{m.errors} failed requests</span>
+                </h2>
+
+                {/* Status code breakdown */}
+                {m.status_summary && (
+                  <div className="mb-4">
+                    <p className="text-xs font-medium text-red-700 mb-2">HTTP status code breakdown:</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {Object.entries(m.status_summary.details || {}).map(([code, count]) => {
+                        const is4xx = code.startsWith('4')
+                        const is5xx = code.startsWith('5')
+                        const is2xx = code.startsWith('2')
+                        const bg = is2xx ? 'bg-green-100 text-green-800 border-green-300' : is4xx ? 'bg-amber-100 text-amber-800 border-amber-300' : is5xx ? 'bg-red-100 text-red-800 border-red-300' : 'bg-gray-100 text-gray-700 border-gray-300'
+                        return (
+                          <div key={code} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${bg}`}>
+                            <span className="font-mono font-bold">{code}</span>
+                            <span>{_statusText(parseInt(code))}</span>
+                            <span className="font-bold">×{count}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Error samples table */}
+                {m.error_samples && m.error_samples.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-red-700 mb-2">Sample failed requests (up to 10):</p>
+                    <div className="overflow-hidden rounded-xl border border-red-200">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-red-600 text-white">
+                            {['Method','Endpoint','Status','Error','Latency'].map(h => (
+                              <th key={h} className={`py-2.5 px-3 font-medium ${h==='Endpoint'?'text-left':'text-center'}`}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {m.error_samples.map((s, i) => (
+                            <tr key={i} className={i%2===0?'bg-white':'bg-red-50/50'}>
+                              <td className="py-2 px-3 text-center">
+                                <span className={`font-mono font-semibold px-2 py-0.5 rounded text-xs ${s.method==='GET'?'bg-blue-50 text-blue-700':'bg-green-50 text-green-700'}`}>{s.method}</span>
+                              </td>
+                              <td className="py-2 px-3 font-mono text-gray-700 max-w-xs truncate">{s.endpoint}</td>
+                              <td className="py-2 px-3 text-center font-bold text-red-600 font-mono">{s.status_code}</td>
+                              <td className="py-2 px-3 text-center text-amber-700 font-medium">{s.status_text}</td>
+                              <td className="py-2 px-3 text-center text-gray-600">{s.latency_ms}ms</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-red-400 mt-2">
+                      <i className="ti ti-info-circle mr-1" />
+                      {m.error_samples[0]?.status_code === 401 && 'HTTP 401 — Token expired or invalid. Refresh the token in Lines of Business and re-run.'}
+                      {m.error_samples[0]?.status_code === 403 && 'HTTP 403 — Forbidden. Check if the LOB has permission to access this API.'}
+                      {m.error_samples[0]?.status_code === 404 && 'HTTP 404 — Endpoint not found. Verify the API URL in the API library.'}
+                      {m.error_samples[0]?.status_code === 500 && 'HTTP 500 — Server error. The API is returning errors under load. Reduce VUs or check server logs.'}
+                      {m.error_samples[0]?.status_code === 429 && 'HTTP 429 — Rate limited. The server is rejecting requests due to too many concurrent calls. Reduce VUs.'}
+                      {m.error_samples[0]?.status_code === 503 && 'HTTP 503 — Service unavailable. Server is overloaded. Reduce VUs or wait and retry.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             {has && m.by_endpoint && Object.keys(m.by_endpoint).length > 0 && (
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm">
                 <h2 className="text-sm font-semibold text-gray-900 mb-3">Per-endpoint breakdown</h2>

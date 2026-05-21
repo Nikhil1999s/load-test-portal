@@ -30,6 +30,53 @@ export default function APIs() {
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState('')
   const [modal, setModal] = useState(null)
+  const [importText, setImportText] = useState('')
+  const [importError, setImportError] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importTab, setImportTab] = useState('curl')
+  const [importParsed, setImportParsed] = useState(null)
+
+  const parseCurl = (curlText) => {
+    try {
+      // Extract URL
+      const urlMatch = curlText.match(/curl\s+['"]?(https?:\/\/[^\s'"\\]+)['"]?/i) ||
+                       curlText.match(/curl\s+[^-\s]*\s+['"]?(https?:\/\/[^\s'"\\]+)['"]?/i)
+      if (!urlMatch) return null
+      const fullUrl = urlMatch[1]
+      const url = new URL(fullUrl)
+      const baseUrl = url.origin
+      const endpoint = url.pathname + url.search
+
+      // Extract method
+      let method = 'GET'
+      const methodMatch = curlText.match(/-X\s+([A-Z]+)/i)
+      if (methodMatch) method = methodMatch[1].toUpperCase()
+      if (curlText.includes('--data') || curlText.includes('-d ')) method = method === 'GET' ? 'POST' : method
+
+      // Extract body
+      let body = ''
+      const bodyMatch = curlText.match(/--data(?:-raw)?\s+'([^']+)'/) ||
+                        curlText.match(/--data(?:-raw)?\s+"([^"]+)"/) ||
+                        curlText.match(/-d\s+'([^']+)'/) ||
+                        curlText.match(/-d\s+"([^"]+)"/)
+      if (bodyMatch) body = bodyMatch[1]
+
+      // Generate name from endpoint
+      const parts = url.pathname.split('/').filter(Boolean)
+      const name = parts[parts.length - 1]
+        ? parts[parts.length - 1].charAt(0).toUpperCase() + parts[parts.length - 1].slice(1)
+        : 'API'
+
+      return {
+        name,
+        method,
+        endpoint,
+        description: '',
+        default_body: body,
+        base_url_override: baseUrl === 'https://demo.salescode.ai' || baseUrl === 'https://uat.salescode.ai' ? '' : baseUrl,
+      }
+    } catch { return null }
+  }
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
@@ -127,6 +174,9 @@ export default function APIs() {
           <button onClick={openAdd} className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700">
             <i className="ti ti-plus" /> Add API
           </button>
+          <button onClick={() => setModal('import')} className="flex items-center gap-1.5 border border-indigo-200 text-indigo-600 text-sm px-4 py-2 rounded-lg hover:bg-indigo-50">
+            <i className="ti ti-file-import" /> Import JSON
+          </button>
         </div>
       </div>
 
@@ -183,7 +233,7 @@ export default function APIs() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{a.name}</td>
+                    <td className="px-4 py-3 text-gray-900">{a.name}</td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-md font-mono font-medium ${METHOD_STYLES[a.method] || 'bg-gray-100 text-gray-600'}`}>
                         {a.method}
@@ -310,6 +360,136 @@ export default function APIs() {
               <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60">
                 {saving ? 'Saving...' : 'Save API'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import modal — supports curl and JSON */}
+      {modal === 'import' && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">Import APIs</h2>
+              <button onClick={() => { setModal(null); setImportText(''); setImportError('') }} className="text-gray-400 hover:text-gray-600"><i className="ti ti-x" /></button>
+            </div>
+
+            {/* Tab switcher */}
+            <div className="flex gap-1 px-6 pt-4">
+              {[
+                { id: 'curl', icon: 'ti-terminal', label: 'From cURL' },
+                { id: 'json', icon: 'ti-braces', label: 'From JSON' },
+              ].map(t => (
+                <button key={t.id} onClick={() => { setImportTab(t.id); setImportText(''); setImportError(''); setImportParsed(null) }}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    importTab === t.id ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}>
+                  <i className={`ti ${t.icon}`} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="px-6 py-4 space-y-3">
+              {importTab === 'curl' ? (
+                <>
+                  <div className="bg-gray-900 rounded-xl p-3 text-xs text-green-400 font-mono">
+                    <p className="text-gray-500 mb-1"># Paste any curl command — portal parses it automatically</p>
+                    <p>curl 'https://demo.salescode.ai/v1/outletStatus/hierarchy?size=1000' \</p>
+                    <p>{'  '}-H 'authorization: Bearer ...' \</p>
+                    <p>{'  '}-H 'lob: cokesademo'</p>
+                  </div>
+                  {importError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{importError}</div>}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Paste curl command</label>
+                    <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportError(''); setImportParsed(null) }}
+                      rows={6} placeholder="curl 'https://...' -H 'Content-Type: application/json' --data-raw '{...}'"
+                      className="font-mono text-xs resize-none w-full" />
+                  </div>
+                  {/* Preview parsed result */}
+                  {importParsed && (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs space-y-1">
+                      <p className="font-semibold text-green-700 mb-2">✓ Parsed successfully — review before saving:</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><span className="text-gray-500">Name:</span> <input value={importParsed.name} onChange={e => setImportParsed(p => ({...p, name: e.target.value}))} className="text-xs ml-1 border-b border-gray-300 bg-transparent w-40" /></div>
+                        <div><span className="text-gray-500">Method:</span> <span className="font-bold text-indigo-600 ml-1">{importParsed.method}</span></div>
+                        <div className="col-span-2"><span className="text-gray-500">Endpoint:</span> <span className="font-mono ml-1 text-gray-800">{importParsed.endpoint}</span></div>
+                        {importParsed.base_url_override && <div className="col-span-2"><span className="text-gray-500">Base URL:</span> <span className="font-mono ml-1 text-gray-800">{importParsed.base_url_override}</span></div>}
+                        {importParsed.default_body && <div className="col-span-2"><span className="text-gray-500">Body:</span> <span className="font-mono ml-1 text-gray-600 break-all">{importParsed.default_body.slice(0,80)}{importParsed.default_body.length>80?'...':''}</span></div>}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-700">
+                    <p className="font-semibold mb-1">JSON array format:</p>
+                    <pre className="font-mono leading-relaxed">{`[{"name":"Outlet Status","method":"GET","endpoint":"/v1/outletStatus","description":"","default_body":""}]`}</pre>
+                  </div>
+                  {importError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{importError}</div>}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Paste JSON array</label>
+                    <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportError('') }}
+                      rows={8} placeholder='[{"name": "...", "method": "GET", "endpoint": "/v1/..."}]'
+                      className="font-mono text-xs resize-none w-full" />
+                  </div>
+                </>
+              )}
+              <p className="text-xs text-gray-400">APIs with the same name will be skipped.</p>
+            </div>
+
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => { setModal(null); setImportText(''); setImportError(''); setImportParsed(null) }}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+
+              {importTab === 'curl' ? (
+                <>
+                  {!importParsed ? (
+                    <button onClick={() => {
+                      setImportError('')
+                      const parsed = parseCurl(importText.trim())
+                      if (!parsed) { setImportError('Could not parse curl — make sure it has a valid URL'); return }
+                      setImportParsed(parsed)
+                    }} className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={!importText.trim()}>
+                      <i className="ti ti-search" /> Parse curl
+                    </button>
+                  ) : (
+                    <button onClick={async () => {
+                      setImporting(true)
+                      try {
+                        await apisApi.create({ ...importParsed, active: true })
+                        fetchApis(); setModal(null); setImportText(''); setImportParsed(null)
+                        alert('API added successfully!')
+                      } catch (e) { setImportError(e.response?.data?.detail || 'Failed to add API') }
+                      finally { setImporting(false) }
+                    }} disabled={importing} className="flex items-center gap-1.5 bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
+                      <i className={`ti ${importing ? 'ti-loader-2 animate-spin' : 'ti-check'}`} />
+                      {importing ? 'Saving...' : 'Save API'}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button disabled={importing || !importText.trim()} onClick={async () => {
+                  setImportError('')
+                  let parsed
+                  try { parsed = JSON.parse(importText.trim()) }
+                  catch { setImportError('Invalid JSON'); return }
+                  if (!Array.isArray(parsed)) { setImportError('Must be a JSON array [ ... ]'); return }
+                  setImporting(true)
+                  let added = 0, skipped = 0
+                  for (const api of parsed) {
+                    if (!api.name || !api.method || !api.endpoint) { skipped++; continue }
+                    try {
+                      await apisApi.create({ name: api.name, method: api.method.toUpperCase(), endpoint: api.endpoint, description: api.description || '', default_body: api.default_body || '', base_url_override: api.base_url_override || '', active: true })
+                      added++
+                    } catch { skipped++ }
+                  }
+                  setImporting(false); fetchApis(); setModal(null); setImportText('')
+                  alert(`Import complete — ${added} added, ${skipped} skipped.`)
+                }} className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  <i className={`ti ${importing ? 'ti-loader-2 animate-spin' : 'ti-file-import'}`} />
+                  {importing ? 'Importing...' : 'Import APIs'}
+                </button>
+              )}
             </div>
           </div>
         </div>
