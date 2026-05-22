@@ -37,7 +37,8 @@ def _iso_utc(dt: datetime) -> str:
 def _run_time_window(
     run: models.TestRun, buffer_seconds: int, *, strict: bool = False
 ) -> tuple[datetime, datetime]:
-    start = run.created_at
+    # Use test_started_at (actual subprocess start) if available, else fallback to created_at
+    start = run.test_started_at if run.test_started_at else run.created_at
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
 
@@ -48,9 +49,12 @@ def _run_time_window(
     else:
         end = start + timedelta(seconds=run.duration_seconds or 60)
 
-    if strict:
-        return start, end
-    buf = timedelta(seconds=buffer_seconds)
+    # Always add buffer to account for:
+    # - k6/jmeter startup time (1-3 seconds)
+    # - Log sync lag in OpenObserve (can be 10-30 seconds)
+    # Default buffer: 30 seconds on each side
+    default_buffer = 30
+    buf = timedelta(seconds=buffer_seconds if buffer_seconds > 0 else default_buffer)
     return start - buf, end + buf
 
 
@@ -89,6 +93,7 @@ def _list_runs(lob_id: Optional[int], db: Session):
             "duration_seconds": run.duration_seconds,
             "status": run.status,
             "created_at": run.created_at.isoformat(),
+            "test_started_at": run.test_started_at.isoformat() if run.test_started_at else None,
             "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         })
     return result
@@ -133,7 +138,10 @@ def _k6_metrics(run: models.TestRun) -> dict:
         return {}
     try:
         data = json.loads(run.report_json)
-        return data.get("metrics", {})
+        metrics = data.get("metrics", {})
+        # Include by_endpoint for comparison with Pulse
+        metrics["by_endpoint"] = data.get("by_endpoint", {})
+        return metrics
     except json.JSONDecodeError:
         return {}
 
@@ -274,7 +282,8 @@ def get_run_performance_stats(
     x_openobserve_cookie: Optional[str] = Header(None),
 ):
     auth = _auth_from_headers(x_openobserve_jwt, x_openobserve_sctoken, x_openobserve_cookie)
-    run, lob, buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=True)
+    # Use 30 second buffer to account for log sync lag
+    run, lob, buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=False)
 
     if not has_auth(auth):
         raise HTTPException(status_code=503, detail="OpenObserve not configured.")
@@ -297,12 +306,17 @@ def get_run_performance_stats(
 
 
 def _run_payload(run, lob, buffer, start_dt, end_dt, data: dict, *, strict: bool = False) -> dict:
+    # Calculate microsecond timestamps for debugging
+    start_us = dt_to_microseconds(start_dt)
+    end_us = dt_to_microseconds(end_dt)
+
     return {
         "run": {
             "id": run.id,
             "lob_name": lob.name,
             "lob_env": lob.environment,
             "created_at": _iso_utc(run.created_at),
+            "test_started_at": _iso_utc(run.test_started_at) if run.test_started_at else None,
             "finished_at": _iso_utc(run.finished_at) if run.finished_at else None,
             "virtual_users": run.virtual_users,
             "duration_seconds": run.duration_seconds,
@@ -311,8 +325,7 @@ def _run_payload(run, lob, buffer, start_dt, end_dt, data: dict, *, strict: bool
             "start": _iso_utc(start_dt),
             "end": _iso_utc(end_dt),
             "buffer_seconds": buffer,
-            "strict": strict,
-            "note": "Exact run start → end (no extra buffer)" if strict else None,
+            "note": f"OpenObserve logs within ±{buffer}s of run time",
         },
         **data,
     }

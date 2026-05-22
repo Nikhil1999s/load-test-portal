@@ -13,9 +13,13 @@ export default function PerformanceDashboard({ data, onReload }) {
   const cpu = data?.cpu?.summary || {}
   const health = HEALTH[data?.health] || HEALTH.warning
 
-  const totalReq = http.total_requests ?? k6.total_requests
+  const k6TotalReq = k6.total_requests
+  const pulseTotalReq = http.total_requests
   const errPct = k6.error_rate_pct ?? 0
   const httpErrors = data?.errors_timeline?.total_errors ?? 0
+
+  // Check if there's a significant mismatch between k6 and Pulse
+  const hasMismatch = k6TotalReq && pulseTotalReq && Math.abs(k6TotalReq - pulseTotalReq) > 5
 
   return (
     <div className="space-y-8">
@@ -26,7 +30,7 @@ export default function PerformanceDashboard({ data, onReload }) {
             <i className={`ti ${health.icon}`} />
             {health.label}
           </span>
-          <span className="text-xs text-slate-500">Pulse + k6 · run window only</span>
+          <span className="text-xs text-slate-500">Run window only</span>
         </div>
         <button
           type="button"
@@ -43,26 +47,58 @@ export default function PerformanceDashboard({ data, onReload }) {
         </div>
       )}
 
-      {/* KPI grid */}
+      {hasMismatch && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs px-4 py-3 rounded-xl">
+          <i className="ti ti-info-circle mr-1" />
+          <strong>Note:</strong> k6 recorded {k6TotalReq} requests, Pulse shows {pulseTotalReq} logged.
+          <span className="text-blue-600 ml-1">(Not all endpoints may be instrumented in OpenObserve)</span>
+        </div>
+      )}
+
+      {/* k6 Metrics Section */}
       <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Key metrics</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-          <KpiCard label="Total requests" value={totalReq} icon="ti-arrows-shuffle" />
-          <KpiCard label="k6 avg latency" value={k6.avg_ms != null ? `${k6.avg_ms} ms` : null} icon="ti-clock" accent />
-          <KpiCard label="k6 p99" value={k6.p99_ms != null ? `${k6.p99_ms} ms` : null} icon="ti-chart-line" />
-          <KpiCard label="Pulse max RT" value={http.max_response_ms ? `${http.max_response_ms} ms` : null} icon="ti-bolt" accent />
-          <KpiCard
-            label="Max CPU"
-            value={cpu.max_cpu_percent != null ? `${cpu.max_cpu_percent}%` : null}
-            icon="ti-cpu"
-            warn={cpu.max_cpu_percent > 80}
-          />
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
+          <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">k6</span>
+          Load test tool metrics (actual requests made)
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KpiCard label="Total requests" value={k6TotalReq} icon="ti-arrows-shuffle" source="k6" />
+          <KpiCard label="Avg latency" value={k6.avg_ms != null ? `${k6.avg_ms} ms` : null} icon="ti-clock" accent source="k6" />
+          <KpiCard label="p90 latency" value={k6.p90_ms != null ? `${k6.p90_ms} ms` : null} icon="ti-chart-line" source="k6" />
+          <KpiCard label="p99 latency" value={k6.p99_ms != null ? `${k6.p99_ms} ms` : null} icon="ti-chart-line" source="k6" />
           <KpiCard
             label="Error rate"
             value={errPct != null ? `${Number(errPct).toFixed(2)}%` : null}
             icon="ti-bug"
             warn={errPct > 1}
-            sub={httpErrors > 0 ? `${httpErrors} HTTP errors in window` : 'k6 + Pulse'}
+            source="k6"
+          />
+        </div>
+      </section>
+
+      {/* Pulse/OpenObserve Metrics Section */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
+          <span className="bg-teal-100 text-teal-700 px-2 py-0.5 rounded">Pulse</span>
+          OpenObserve logged metrics (backend instrumentation)
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KpiCard label="Logged requests" value={pulseTotalReq} icon="ti-database" source="pulse" />
+          <KpiCard label="Avg response" value={http.avg_response_ms ? `${http.avg_response_ms} ms` : null} icon="ti-clock" source="pulse" />
+          <KpiCard label="Max response" value={http.max_response_ms ? `${http.max_response_ms} ms` : null} icon="ti-bolt" accent source="pulse" />
+          <KpiCard
+            label="HTTP errors"
+            value={httpErrors}
+            icon="ti-alert-triangle"
+            warn={httpErrors > 0}
+            source="pulse"
+          />
+          <KpiCard
+            label="Max CPU"
+            value={cpu.max_cpu_percent != null ? `${cpu.max_cpu_percent}%` : null}
+            icon="ti-cpu"
+            warn={cpu.max_cpu_percent > 80}
+            source="pulse"
           />
         </div>
       </section>
@@ -142,11 +178,12 @@ export default function PerformanceDashboard({ data, onReload }) {
       {/* Comparison + tables */}
       <section className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-900 mb-4">k6 vs Pulse (latency)</h3>
+          <h3 className="text-sm font-semibold text-slate-900 mb-4">k6 vs Pulse comparison</h3>
           <div className="space-y-3 text-sm">
-            <CompareRow label="Average" k6={k6.avg_ms} pulse={http.avg_response_ms} unit="ms" />
-            <CompareRow label="Tail (p99)" k6={k6.p99_ms} pulse={http.max_response_ms} unit="ms" note="Pulse uses max in window" />
-            <CompareRow label="Error %" k6={errPct} pulse={null} unit="%" />
+            <CompareRow label="Total requests" k6={k6TotalReq} pulse={pulseTotalReq} unit="" note="Pulse only shows instrumented endpoints" />
+            <CompareRow label="Avg latency" k6={k6.avg_ms} pulse={http.avg_response_ms} unit="ms" />
+            <CompareRow label="Tail (p99/max)" k6={k6.p99_ms} pulse={http.max_response_ms} unit="ms" note="Pulse uses max in window" />
+            <CompareRow label="Errors" k6={k6TotalReq && errPct ? Math.round(k6TotalReq * errPct / 100) : null} pulse={httpErrors} unit="" note="k6 calculated from error rate" />
           </div>
         </div>
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -167,6 +204,66 @@ export default function PerformanceDashboard({ data, onReload }) {
           )}
         </div>
       </section>
+
+      {/* Endpoint Coverage Comparison */}
+      {data?.endpoint_comparison?.length > 0 && (
+        <section>
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">
+            Endpoint coverage: k6 vs Pulse
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              (Why request counts differ)
+            </span>
+          </h3>
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-700 text-white text-xs">
+                  {['Endpoint', 'Method', 'k6 Requests', 'k6 Errors', 'Status Codes', 'In Pulse?'].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.endpoint_comparison.map((ep, i) => (
+                  <tr key={i} className={`${i % 2 ? 'bg-slate-50/60' : 'bg-white'} ${!ep.in_pulse ? 'bg-amber-50' : ''}`}>
+                    <td className="px-4 py-2.5 font-mono text-xs text-slate-800 max-w-xs truncate" title={ep.endpoint}>
+                      {ep.endpoint}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs font-medium text-slate-600">{ep.method || '—'}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{ep.k6_requests || '—'}</td>
+                    <td className={`px-4 py-2.5 tabular-nums ${ep.k6_errors > 0 ? 'text-red-600 font-medium' : ''}`}>
+                      {ep.k6_errors || 0}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs">
+                      {Object.entries(ep.k6_status_codes || {}).map(([code, count]) => (
+                        <span key={code} className={`inline-block mr-1 px-1.5 py-0.5 rounded ${
+                          parseInt(code) >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                        }`}>
+                          {code}: {count}
+                        </span>
+                      ))}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {ep.in_pulse ? (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-medium">
+                          ✓ Logged
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          ✗ Missing
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-slate-500 mt-2">
+            <strong>Missing = not logged to OpenObserve</strong>. The target backend doesn't instrument these endpoints with event_type='api_request' and matching LOB.
+          </p>
+        </section>
+      )}
 
       {data?.http?.paths?.length > 0 && (
         <section>
@@ -210,13 +307,18 @@ export default function PerformanceDashboard({ data, onReload }) {
       )}
 
       <p className="text-[10px] text-slate-400 text-center pb-2">
-        Sources: OpenObserve (channelkart logs, jvm_cpu_recent_utilization) · k6 report · exact run start/end
+        <strong>k6:</strong> Metrics from load test tool (actual requests made) ·
+        <strong>Pulse:</strong> OpenObserve logs (only instrumented endpoints with matching LOB)
       </p>
     </div>
   )
 }
 
-function KpiCard({ label, value, icon, accent, warn, sub }) {
+function KpiCard({ label, value, icon, accent, warn, sub, source }) {
+  const sourceColors = {
+    k6: 'bg-indigo-100 text-indigo-600',
+    pulse: 'bg-teal-100 text-teal-600',
+  }
   return (
     <div
       className={`rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md ${
@@ -228,6 +330,11 @@ function KpiCard({ label, value, icon, accent, warn, sub }) {
         <i className={`ti ${icon} text-lg ${warn ? 'text-red-400' : 'text-[#0bacaa]/60'}`} />
       </div>
       <p className={`text-xl font-bold mt-2 tabular-nums ${warn ? 'text-red-700' : 'text-slate-900'}`}>{value ?? '—'}</p>
+      {source && (
+        <span className={`inline-block text-[9px] font-medium px-1.5 py-0.5 rounded mt-1 ${sourceColors[source] || 'bg-slate-100 text-slate-500'}`}>
+          {source === 'k6' ? 'from k6' : 'from Pulse'}
+        </span>
+      )}
       {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
     </div>
   )
@@ -250,3 +357,4 @@ function CompareRow({ label, k6, pulse, unit, note }) {
     </div>
   )
 }
+

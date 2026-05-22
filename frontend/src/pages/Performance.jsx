@@ -228,8 +228,13 @@ export default function Performance() {
           </p>
           {win && (
             <p className="text-xs text-teal-800 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2 mt-2">
-              <strong>Run window only (IST):</strong> {formatUtc(win.start)} → {formatUtc(win.end)}
+              <strong>Query window (IST):</strong> {formatUtc(win.start)} → {formatUtc(win.end)}
               {win.strict && ' · exact start/end, no buffer'}
+              {statsData?.run?.test_started_at && (
+                <span className="block mt-1 text-teal-600">
+                  <strong>Test started:</strong> {formatUtc(statsData.run.test_started_at)}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -395,7 +400,7 @@ export default function Performance() {
                 <tr key={run.id} className={`hover:bg-teal-50/30 cursor-pointer ${i % 2 ? 'bg-gray-50/50' : 'bg-white'}`}
                   onClick={() => openRun(run)}>
                   <td className="px-4 py-3 font-mono text-xs text-gray-400 border border-gray-200">#{run.id}</td>
-                  <td className="px-4 py-3 text-xs border border-gray-200">{new Date(run.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 text-xs border border-gray-200">{formatUtc(run.created_at)}</td>
                   <td className="px-4 py-3 font-semibold border border-gray-200">{run.lob_name}</td>
                   <td className="px-4 py-3 border border-gray-200">
                     <span className={`text-xs px-2 py-0.5 rounded-md ${ENV_STYLE[run.lob_env] || 'bg-gray-50'}`}>{run.lob_env}</span>

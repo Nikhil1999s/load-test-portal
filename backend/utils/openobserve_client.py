@@ -700,6 +700,115 @@ def search_cpu_stats(
     }
 
 
+def build_mismatch_diagnostic_sql() -> dict[str, str]:
+    """SQL queries to diagnose why k6 requests don't appear in Pulse."""
+    stream = _stream()
+    return {
+        # Count all api_request logs (no LOB filter) - are there more with different LOB?
+        "all_api_requests": f"""SELECT COUNT(*) as total FROM "{stream}" WHERE event_type = 'api_request'""",
+
+        # Group by LOB to see which LOBs have logs
+        "by_lob": f"""SELECT lob, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY lob ORDER BY count DESC""",
+
+        # Group by user_agent to see k6 vs other traffic
+        "by_user_agent": f"""SELECT http_user_agent, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY http_user_agent ORDER BY count DESC LIMIT 10""",
+
+        # Group by endpoint to see which endpoints are logged
+        "by_endpoint": f"""SELECT http_url_path, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY http_url_path ORDER BY count DESC LIMIT 20""",
+
+        # Count all logs (any event_type) to see total activity
+        "all_logs": f"""SELECT event_type, COUNT(*) as count FROM "{stream}" GROUP BY event_type ORDER BY count DESC LIMIT 10""",
+
+        # Get first and last timestamp of api_request logs in window (for timing debug)
+        "time_range": f"""SELECT MIN(_timestamp) as first_log_us, MAX(_timestamp) as last_log_us FROM "{stream}" WHERE event_type = 'api_request'""",
+    }
+
+
+def run_mismatch_diagnostic(
+    lob_name: str,
+    start_time_us: int,
+    end_time_us: int,
+    lob_environment: str = "demo",
+    auth_override: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run diagnostic queries to find why k6 requests are missing from Pulse."""
+    results = {}
+    sqls = build_mismatch_diagnostic_sql()
+
+    for name, sql in sqls.items():
+        try:
+            raw = search_stream_raw(
+                sql, start_time_us, end_time_us, lob_environment,
+                stream_type="logs", search_type="dashboards", auth_override=auth_override,
+            )
+            results[name] = raw.get("hits", [])
+        except Exception as e:
+            results[name] = {"error": str(e)}
+
+    # Build summary
+    summary = {
+        "total_api_requests_all_lobs": 0,
+        "requests_by_lob": {},
+        "requests_by_user_agent": {},
+        "requests_by_endpoint": {},
+        "event_types": {},
+        "time_range": {},
+    }
+
+    # Parse results
+    if isinstance(results.get("all_api_requests"), list) and results["all_api_requests"]:
+        summary["total_api_requests_all_lobs"] = results["all_api_requests"][0].get("total", 0)
+
+    if isinstance(results.get("by_lob"), list):
+        for row in results["by_lob"]:
+            lob = row.get("lob", "unknown")
+            summary["requests_by_lob"][lob] = row.get("count", 0)
+
+    if isinstance(results.get("by_user_agent"), list):
+        for row in results["by_user_agent"]:
+            ua = row.get("http_user_agent", "unknown")
+            # Shorten user agent for display
+            if len(ua) > 50:
+                ua = ua[:47] + "..."
+            summary["requests_by_user_agent"][ua] = row.get("count", 0)
+
+    if isinstance(results.get("by_endpoint"), list):
+        for row in results["by_endpoint"]:
+            ep = row.get("http_url_path", "unknown")
+            summary["requests_by_endpoint"][ep] = row.get("count", 0)
+
+    if isinstance(results.get("all_logs"), list):
+        for row in results["all_logs"]:
+            evt = row.get("event_type", "unknown")
+            summary["event_types"][evt] = row.get("count", 0)
+
+    # Parse time range
+    if isinstance(results.get("time_range"), list) and results["time_range"]:
+        tr = results["time_range"][0]
+        first_us = tr.get("first_log_us")
+        last_us = tr.get("last_log_us")
+        summary["time_range"] = {
+            "first_log_us": first_us,
+            "last_log_us": last_us,
+            "query_start_us": start_time_us,
+            "query_end_us": end_time_us,
+            "first_log_iso": datetime.fromtimestamp(first_us / 1_000_000, tz=timezone.utc).isoformat() if first_us else None,
+            "last_log_iso": datetime.fromtimestamp(last_us / 1_000_000, tz=timezone.utc).isoformat() if last_us else None,
+        }
+        # Check if logs are outside query window
+        if first_us and last_us:
+            if first_us < start_time_us or last_us > end_time_us:
+                summary["time_range"]["warning"] = "Some logs in OpenObserve are OUTSIDE the query time window!"
+            if first_us > end_time_us or last_us < start_time_us:
+                summary["time_range"]["error"] = "Query window does NOT overlap with logs in OpenObserve!"
+
+    return {
+        "diagnostic": summary,
+        "raw_results": results,
+        "expected_lob": lob_name,
+    }
+
+
 def build_performance_snapshot(
     lob_name: str,
     start_time_us: int,
@@ -716,6 +825,7 @@ def build_performance_snapshot(
     cpu_data: dict = {}
     cpu_tl: dict = {}
     err_tl: dict = {}
+    mismatch_info: dict = {}
 
     try:
         http_data = search_http_stats(lob_name, start_time_us, end_time_us, lob_environment, auth_override)
@@ -750,6 +860,57 @@ def build_performance_snapshot(
     else:
         health = "healthy"
 
+    # Build endpoint comparison: k6 endpoints vs Pulse endpoints
+    k6_endpoints = k6.get("by_endpoint", {})
+    pulse_paths = http_data.get("paths", [])
+
+    # Create a set of Pulse endpoint paths for comparison
+    pulse_endpoint_set = set()
+    for p in pulse_paths:
+        if p.get("path"):
+            pulse_endpoint_set.add(p["path"])
+
+    # Build comparison data
+    endpoint_comparison = []
+    for ep, data in k6_endpoints.items():
+        in_pulse = ep in pulse_endpoint_set
+        # Also check if any pulse path contains this endpoint (partial match)
+        if not in_pulse:
+            for pulse_path in pulse_endpoint_set:
+                if ep in pulse_path or pulse_path in ep:
+                    in_pulse = True
+                    break
+        endpoint_comparison.append({
+            "endpoint": ep,
+            "method": data.get("method", "GET"),
+            "k6_requests": data.get("count", 0),
+            "k6_errors": data.get("errors", 0),
+            "k6_status_codes": data.get("status_codes", {}),
+            "in_pulse": in_pulse,
+        })
+
+    # Add Pulse-only endpoints (logged but not in k6 - unlikely but possible)
+    k6_endpoint_set = set(k6_endpoints.keys())
+    for p in pulse_paths:
+        path = p.get("path", "")
+        if path and path not in k6_endpoint_set:
+            # Check partial match
+            found = False
+            for k6_ep in k6_endpoint_set:
+                if path in k6_ep or k6_ep in path:
+                    found = True
+                    break
+            if not found:
+                endpoint_comparison.append({
+                    "endpoint": path,
+                    "method": "",
+                    "k6_requests": 0,
+                    "k6_errors": 0,
+                    "k6_status_codes": {},
+                    "in_pulse": True,
+                    "pulse_only": True,
+                })
+
     return {
         "health": health,
         "partial_errors": errors,
@@ -763,8 +924,9 @@ def build_performance_snapshot(
         },
         "http": {
             "summary": http_sum,
-            "paths": http_data.get("paths", []),
+            "paths": pulse_paths,
         },
+        "endpoint_comparison": endpoint_comparison,
         "timeline": http_tl.get("timeline", {"points": [], "peak": None}),
         "cpu": {
             "summary": cpu_sum,

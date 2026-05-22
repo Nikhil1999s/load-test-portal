@@ -102,6 +102,10 @@ def run_suite(config: SuiteConfig, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(run)
 
+        # Record actual test start time right before subprocess
+        run.test_started_at = datetime.utcnow()
+        db.commit()
+
         timeout = iter_config.duration_seconds + 120
         metrics = _run_single_k6(
             lob, mappings,
