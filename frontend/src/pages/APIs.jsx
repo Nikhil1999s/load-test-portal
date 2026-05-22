@@ -226,10 +226,10 @@ export default function APIs() {
         </div>
       )}
 
-      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="py-16 text-center text-sm text-gray-400">
-            <i className="ti ti-loader-2 animate-spin text-2xl mb-2 block" />Loading...
+            <i className="ti ti-loader-2 animate-spin text-2xl mb-2 block" style={{color:'#0bacaa'}} />Loading...
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
@@ -237,73 +237,74 @@ export default function APIs() {
             {search ? 'No APIs match your search.' : 'No APIs yet. Add one or click "Add sample APIs".'}
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-gray-500 font-normal w-8"></th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Name</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Method</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Endpoint</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Base URL</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Description</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Body</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Status</th>
-                <th className="px-4 py-3" />
+          <div className="overflow-auto" style={{maxHeight:'calc(100vh - 220px)'}}>
+            <table className="w-full text-sm border-collapse" style={{minWidth:'900px'}}>
+            <thead className="sticky top-0 z-10">
+              <tr style={{background:'#0bacaa'}} className="text-white text-xs">
+                <th className="py-3 px-4 text-center w-8 border border-teal-500"></th>
+                <th className="py-3 px-4 text-left font-semibold border border-teal-500">NAME</th>
+                <th className="py-3 px-4 text-center font-semibold w-20 border border-teal-500">METHOD</th>
+                <th className="py-3 px-4 text-left font-semibold border border-teal-500">ENDPOINT</th>
+                <th className="py-3 px-4 text-left font-semibold w-28 border border-teal-500">BASE URL</th>
+                <th className="py-3 px-4 text-left font-semibold w-36 border border-teal-500">DESCRIPTION</th>
+                <th className="py-3 px-4 text-center font-semibold w-20 border border-teal-500">BODY</th>
+                <th className="py-3 px-4 text-center font-semibold w-24 border border-teal-500">STATUS</th>
+                <th className="py-3 px-4 text-center font-semibold w-20 border border-teal-500">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(a => (
+              {filtered.map((a, i) => (
                 <>
-                  <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
+                  <tr key={a.id} className={`hover:bg-teal-50/20 transition-colors ${i%2===0?'bg-white':'bg-gray-50/50'}`}>
+                    <td className="px-4 py-3 text-center border border-gray-200">
                       {a.default_body && (
-                        <button onClick={() => toggleExpand(a.id)} className="text-gray-400 hover:text-gray-600">
-                          <i className={`ti ${expanded[a.id] ? 'ti-chevron-down' : 'ti-chevron-right'} text-xs`} />
+                        <button onClick={() => toggleExpand(a.id)} className="text-gray-400 hover:text-teal-600 transition-colors">
+                          <i className={`ti ${expanded[a.id] ? 'ti-chevron-down' : 'ti-chevron-right'} text-sm`} />
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-900">{a.name}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-md font-mono font-medium ${METHOD_STYLES[a.method] || 'bg-gray-100 text-gray-600'}`}>
+                    <td className="px-4 py-3 font-semibold text-gray-900 border border-gray-200">{a.name}</td>
+                    <td className="px-4 py-3 text-center border border-gray-200">
+                      <span className={`text-xs px-2.5 py-1 rounded-lg font-bold border ${METHOD_STYLES[a.method] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                         {a.method}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600 max-w-xs">
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600 max-w-xs border border-gray-200">
                       <div className="truncate" title={a.endpoint}>{a.endpoint}</div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">
+                    <td className="px-4 py-3 text-xs border border-gray-200">
                       {a.base_url_override
-                        ? <span className="font-mono text-indigo-500 text-xs" title={a.base_url_override}>Custom URL</span>
-                        : <span className="text-gray-300">LOB default</span>}
+                        ? <span className="font-mono text-indigo-500 text-xs bg-indigo-50 px-2 py-0.5 rounded" title={a.base_url_override}>Custom</span>
+                        : <span className="text-gray-400 text-xs">LOB default</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{a.description || '—'}</td>
-                    <td className="px-4 py-3 text-xs">
+                    <td className="px-4 py-3 text-gray-500 text-xs border border-gray-200">{a.description || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-4 py-3 text-center border border-gray-200">
                       {a.default_body
-                        ? <button className="text-indigo-500 hover:text-indigo-700" onClick={() => toggleExpand(a.id)}>View body</button>
-                        : <span className="text-gray-300">—</span>}
+                        ? <button className="text-xs font-medium px-2.5 py-1 rounded-lg border hover:bg-teal-50 transition-colors" style={{color:'#0bacaa', borderColor:'#B2EBF2'}} onClick={() => toggleExpand(a.id)}>View</button>
+                        : <span className="text-gray-300 text-xs">—</span>}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`flex items-center gap-1.5 text-xs ${a.active ? 'text-green-700' : 'text-gray-400'}`}>
+                    <td className="px-4 py-3 text-center border border-gray-200">
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${a.active ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${a.active ? 'bg-green-500' : 'bg-gray-300'}`} />
                         {a.active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 justify-end">
-                        <button onClick={() => openEdit(a)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-200" aria-label="Edit">
+                    <td className="px-4 py-3 border border-gray-200">
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <button onClick={() => openEdit(a)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-colors" title="Edit">
                           <i className="ti ti-edit text-sm" />
                         </button>
-                        <button onClick={() => handleDelete(a.id, a.name)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200" aria-label="Delete">
+                        <button onClick={() => handleDelete(a.id, a.name)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors" title="Delete">
                           <i className="ti ti-trash text-sm" />
                         </button>
                       </div>
                     </td>
                   </tr>
                   {expanded[a.id] && a.default_body && (
-                    <tr key={`${a.id}-body`} className="bg-gray-50 border-b border-gray-100">
-                      <td colSpan={8} className="px-8 py-3">
-                        <p className="text-xs text-gray-500 mb-1.5 font-medium">Default request body</p>
-                        <pre className="text-xs font-mono bg-white border border-gray-100 rounded-lg p-3 text-gray-700 overflow-x-auto">{formatJson(a.default_body)}</pre>
+                    <tr key={`${a.id}-body`} className="bg-teal-50/30 border-b border-teal-100">
+                      <td colSpan={9} className="px-8 py-4 border border-teal-100">
+                        <p className="text-xs font-semibold mb-2" style={{color:'#0bacaa'}}>Default request body</p>
+                        <pre className="text-xs font-mono bg-white border border-gray-200 rounded-xl p-3 text-gray-700 overflow-x-auto shadow-sm">{formatJson(a.default_body)}</pre>
                       </td>
                     </tr>
                   )}
@@ -311,6 +312,7 @@ export default function APIs() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

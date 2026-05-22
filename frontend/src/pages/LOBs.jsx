@@ -230,39 +230,40 @@ export default function LOBs() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4"><i className="ti ti-alert-circle mr-2" />{error}</div>}
 
-      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400"><i className="ti ti-loader-2 animate-spin text-2xl mb-2 block" />Loading...</div>
+          <div className="py-16 text-center text-sm text-gray-400"><i className="ti ti-loader-2 animate-spin text-2xl mb-2 block" style={{color:'#0bacaa'}} />Loading...</div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
             <i className="ti ti-building text-3xl mb-2 block text-gray-300" />
             {search ? 'No LOBs match your search.' : 'No LOBs yet. Add your first one.'}
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">LOB name</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Base URL</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Environment</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Token status</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-normal">Status</th>
-                <th className="px-4 py-3" />
+              <tr style={{background:'#0bacaa'}} className="text-white text-xs">
+                <th className="text-left px-4 py-3 font-semibold border border-teal-500">LOB NAME</th>
+                <th className="text-left px-4 py-3 font-semibold border border-teal-500">BASE URL</th>
+                <th className="text-center px-4 py-3 font-semibold w-24 border border-teal-500">ENVIRONMENT</th>
+                <th className="text-left px-4 py-3 font-semibold border border-teal-500">AUTH HEADER</th>
+                <th className="text-left px-4 py-3 font-semibold border border-teal-500">TOKEN STATUS</th>
+                <th className="text-center px-4 py-3 font-semibold w-24 border border-teal-500">STATUS</th>
+                <th className="text-center px-4 py-3 font-semibold w-24 border border-teal-500">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(lob => (
-                <tr key={lob.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-900">{lob.name}</td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{lob.base_url}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${ENV_STYLES[lob.environment] || 'bg-gray-50 text-gray-600'}`}>{lob.environment}</span>
+              {filtered.map((lob, i) => (
+                <tr key={lob.id} className={`hover:bg-teal-50/20 transition-colors ${i%2===0?'bg-white':'bg-gray-50/50'}`}>
+                  <td className="px-4 py-3 font-bold text-gray-900 border border-gray-200">{lob.name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 border border-gray-200">{lob.base_url}</td>
+                  <td className="px-4 py-3 text-center border border-gray-200">
+                    <span className={`text-xs px-2.5 py-1 rounded-lg font-medium border ${ENV_STYLES[lob.environment] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>{lob.environment}</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{lob.auth_header_name}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 border border-gray-200">{lob.auth_header_name}</td>
+                  <td className="px-4 py-3 border border-gray-200">
                     <div className="flex items-center gap-2">
                       {lob.auth_header_value ? (
-                        <div className="flex items-center gap-2">
+                        <>
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-full">
                             <i className="ti ti-circle-check" /> Token ready
                           </span>
@@ -275,11 +276,11 @@ export default function LOBs() {
                               try { await lobsApi.generateToken(lob.id); fetchLobs() }
                               catch (err) { alert(err.response?.data?.detail || 'Token refresh failed') }
                               finally { btn.disabled = false }
-                            }} className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-teal-600 border border-gray-200 hover:border-teal-300 px-2 py-1 rounded-lg transition-colors" title="Regenerate token">
+                            }} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-teal-600 border border-gray-200 hover:border-teal-300 px-2 py-1 rounded-lg transition-colors">
                               <i className="ti ti-refresh text-xs" /> Refresh
                             </button>
                           )}
-                        </div>
+                        </>
                       ) : lob.login_id ? (
                         <button onClick={async (e) => {
                           e.stopPropagation()
@@ -295,16 +296,16 @@ export default function LOBs() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`flex items-center gap-1.5 text-xs ${lob.active ? 'text-green-700' : 'text-gray-400'}`}>
+                  <td className="px-4 py-3 text-center border border-gray-200">
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${lob.active ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${lob.active ? 'bg-green-500' : 'bg-gray-300'}`} />
                       {lob.active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      <button onClick={() => openEdit(lob)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-200"><i className="ti ti-edit text-sm" /></button>
-                      <button onClick={() => handleDelete(lob.id, lob.name)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200"><i className="ti ti-trash text-sm" /></button>
+                  <td className="px-4 py-3 border border-gray-200">
+                    <div className="flex items-center gap-1.5 justify-center">
+                      <button onClick={() => openEdit(lob)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-colors" title="Edit"><i className="ti ti-edit text-sm" /></button>
+                      <button onClick={() => handleDelete(lob.id, lob.name)} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors" title="Delete"><i className="ti ti-trash text-sm" /></button>
                     </div>
                   </td>
                 </tr>

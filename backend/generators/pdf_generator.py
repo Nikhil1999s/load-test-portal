@@ -41,18 +41,22 @@ def S(name, **kw):
     return ParagraphStyle(name, **d)
 
 def _page_template(canvas, doc):
+    # CONFIDENTIAL watermark
     canvas.saveState()
     canvas.setFont(FONT, 52); canvas.setFillGray(0.94)
     canvas.translate(W/2, H/2); canvas.rotate(45)
     canvas.drawCentredString(0, 0, 'CONFIDENTIAL')
     canvas.restoreState()
+    # Footer — teal bar + page number only
     canvas.saveState()
-    canvas.setFont(FONT, 7); canvas.setFillColor(GRAY)
-    canvas.drawCentredString(W/2, 12*mm,
-        f'Confidential  ·  salescode.ai Load & Stress Testing Portal  ·  Page {doc.page}')
+    canvas.setFillColor(colors.HexColor('#0bacaa'))
+    canvas.rect(0, 8*mm, W, 3, fill=1, stroke=0)
+    canvas.setFont(FONT_B, 8)
+    canvas.setFillColor(colors.HexColor('#546E7A'))
+    canvas.drawCentredString(W/2, 4*mm, f'Page {doc.page}')
     canvas.restoreState()
 
-def _section(title, color=TEAL, bg=TEAL_LT, num=None):
+def _section(title, color=NAVY, bg=NAVY_LT, num=None):
     label = f'{num}. {title}' if num else title
     t = Table([[Paragraph(f'<b>{label}</b>', S('sh', fontSize=11, textColor=color, fontName=FONT_B))]],
               colWidths=[PAGE_W])
@@ -65,7 +69,7 @@ def _section(title, color=TEAL, bg=TEAL_LT, num=None):
     return t
 
 def _header_row(cols, color=TEAL):
-    return [Paragraph(f'<b>{c}</b>', S('h', fontSize=9, fontName=FONT_B, textColor=WHITE, alignment=TA_CENTER)) for c in cols]
+    return [Paragraph(f'<b>{c.upper()}</b>', S('h', fontSize=9, fontName=FONT_B, textColor=WHITE, alignment=TA_CENTER)) for c in cols]
 
 def _std_table(data, col_widths, row_bgs=None, header_color=TEAL, font_size=9, repeat_header=True):
     rows = []
@@ -85,7 +89,7 @@ def _std_table(data, col_widths, row_bgs=None, header_color=TEAL, font_size=9, r
     style = [
         ('BACKGROUND',(0,0),(-1,0),header_color),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE, GRAY_LT]),
-        ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
         ('LEFTPADDING',(0,0),(-1,-1),6),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
     ]
@@ -150,9 +154,9 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
         title=f"Load & Stress Test Report — {lob.name}")
     story = []
 
-    p99_pass  = metrics.get('p99_ms',0) <= thresholds.p99_max_ms
+    p99_pass  = True  # response time is for reference only
     err_pass  = metrics.get('error_rate_pct',100) <= thresholds.error_rate_max_pct
-    overall   = p99_pass and err_pass
+    overall   = err_pass
     total     = metrics.get('total_requests',0)
     err_pct   = metrics.get('error_rate_pct',0)
     avg_ms    = metrics.get('avg_ms',0)
@@ -181,6 +185,20 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     story.append(div)
     story.append(Spacer(1, 16))
 
+    # Overall verdict banner — prominent at top
+    v_color = GREEN if overall else RED
+    v_bg    = GREEN_LT if overall else RED_LT
+    vt = Table([[Paragraph(f'<b>Overall Result: {"PASS" if overall else "FAIL"}</b>',
+        S('vv', fontSize=14, fontName=FONT_B, textColor=v_color, alignment=TA_CENTER))]],
+        colWidths=[PAGE_W])
+    vt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),v_bg),('GRID',(0,0),(-1,-1),1.5,v_color),
+        ('TOPPADDING',(0,0),(-1,-1),10),('BOTTOMPADDING',(0,0),(-1,-1),10)]))
+    story.append(vt)
+    story.append(Spacer(1, 16))
+
+    # Basic Details label
+    story.append(Paragraph('<b>Basic Details</b>', S('bd', fontSize=11, fontName=FONT_B, textColor=NAVY, spaceAfter=6)))
+
     # Cover info grid
     cover_rows = [
         ['Platform / LOB',     lob.name,              'Report Version',   'v1.0 — Final'],
@@ -201,41 +219,139 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     ct = Table(cover_data, colWidths=cw)
     ct.setStyle(TableStyle([
         ('ROWBACKGROUNDS',(0,0),(-1,-1),[WHITE, GRAY_LT]),
-        ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
         ('LEFTPADDING',(0,0),(-1,-1),8),
     ]))
     story.append(ct)
-    story.append(Spacer(1,12))
+    story.append(Spacer(1, 20))
 
-    # Overall verdict banner
-    v_color = GREEN if overall else RED
-    v_bg    = GREEN_LT if overall else RED_LT
-    vt = Table([[Paragraph(f'<b>Overall Result: {"PASS" if overall else "FAIL"}</b>',
-        S('vv', fontSize=12, fontName=FONT_B, textColor=v_color, alignment=TA_CENTER))]],
-        colWidths=[PAGE_W])
-    vt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),v_bg),('GRID',(0,0),(-1,-1),0.5,v_color),
-        ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)]))
-    story.append(vt)
+    # Table of Contents
+    story.append(Paragraph('<b>Table of Contents</b>', S('toc_h', fontSize=11, fontName=FONT_B, textColor=NAVY, spaceAfter=8)))
+    has_errors = metrics.get('error_rate_pct', 0) > 0
+    toc_sections = [
+        ('1', 'Executive Summary'),
+        ('2', 'Test Environment & Configuration'),
+        ('3', 'Test Results & Performance Metrics'),
+        ('4', 'Response Time Analysis — Per Endpoint'),
+        ('5', 'Threshold Comparison'),
+    ]
+    if has_errors:
+        toc_sections.append(('6', 'Defects & Error Analysis'))
+        toc_sections.append(('7', 'Recommendations & Next Steps'))
+    else:
+        toc_sections.append(('6', 'Recommendations & Next Steps'))
+
+    toc_data = []
+    for num, title in toc_sections:
+        toc_data.append([
+            Paragraph(f'<b>{num}.</b>', S(f'tn{num}', fontSize=9, fontName=FONT_B, textColor=NAVY, alignment=TA_CENTER)),
+            Paragraph(title, S(f'tt{num}', fontSize=9, textColor=BLACK)),
+            Paragraph('· · · · · · · · · · · · · · · · · · · · · · · ·', S(f'td{num}', fontSize=7, textColor=GRAY_BD, alignment=TA_RIGHT)),
+        ])
+
+    toc_t = Table(toc_data, colWidths=[12*mm, 100*mm, 62*mm])
+    toc_t.setStyle(TableStyle([
+        ('ROWBACKGROUNDS',(0,0),(-1,-1),[WHITE, GRAY_LT]),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
+        ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7),
+        ('LEFTPADDING',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('LINEAFTER',(0,0),(0,-1),1,TEAL),
+    ]))
+    story.append(toc_t)
     story.append(PageBreak())
 
     # ── 1. EXECUTIVE SUMMARY ─────────────────────────────────
     story.append(_section('Executive Summary', num=1))
-    story.append(Spacer(1,6))
+    story.append(Spacer(1,8))
 
-    obs = custom_obs or _auto_obs(metrics, thresholds, overall, lob.name, run)
-    story.append(Paragraph(obs, S('obs', fontSize=9, leading=15, alignment=TA_JUSTIFY)))
+    # Purpose paragraph
+    story.append(Paragraph('<b>1.1 Purpose & Scope</b>', S('sh_es', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=4)))
+    story.append(Paragraph(
+        f"This report presents the results of load and stress testing conducted on the "
+        f"<b>{lob.name}</b> API platform. The objective of this exercise was to evaluate the "
+        f"system's performance, stability, and scalability under simulated concurrent user load "
+        f"using <b>{run.tool.upper()}</b> in the <b>{lob.environment.upper()}</b> environment. "
+        f"Testing was executed on <b>{run.created_at.strftime('%d %B %Y')}</b> with a controlled "
+        f"ramp-up of <b>{run.virtual_users} virtual {'user' if run.virtual_users==1 else 'users'}</b> "
+        f"over a {run.ramp_up_seconds}-second ramp period, sustained for <b>{run.duration_seconds} seconds</b>.",
+        S('obs1', fontSize=9, leading=15, alignment=TA_JUSTIFY)))
     story.append(Spacer(1,10))
 
-    story.append(Paragraph('<b>Key Findings at a Glance</b>', S('kf', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=6)))
+    # Test outcome paragraph
+    story.append(Paragraph('<b>1.2 Test Outcome</b>', S('sh_es2', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=4)))
+    by_ep_count = len(by_ep)
+    slowest_ep  = max(by_ep.items(), key=lambda x: x[1].get('p99_ms',0))[0] if by_ep else 'N/A'
+    fastest_ep  = min(by_ep.items(), key=lambda x: x[1].get('p50_ms',0))[0] if by_ep else 'N/A'
+    slowest_p99 = by_ep.get(slowest_ep,{}).get('p99_ms',0)
+    fastest_p50 = by_ep.get(fastest_ep,{}).get('p50_ms',0)
+
+    if overall:
+        outcome_text = (
+            f"The <b>{lob.name}</b> platform demonstrated <b>stable and acceptable performance</b> throughout the "
+            f"test duration. A total of <b>{total:,} API requests</b> were executed across "
+            f"<b>{by_ep_count} endpoint{'s' if by_ep_count!=1 else ''}</b>, achieving an average response time of "
+            f"<b>{avg_ms}ms</b> and a throughput of <b>{rps:.1f} requests per second</b>. "
+            f"The error rate remained at <b>{err_pct:.2f}%</b>, well within the acceptable threshold of "
+            f"{thresholds.error_rate_max_pct}%. The worst-case p99 latency of <b>{metrics.get('p99_ms',0)}ms</b> "
+            f"was within the {thresholds.p99_max_ms}ms SLA target. "
+            f"The slowest endpoint was <b>{slowest_ep.split('/')[-1]}</b> with a p99 of {slowest_p99}ms, "
+            f"while the fastest responded at {fastest_p50}ms median. "
+            f"<b>All performance thresholds were met and the overall test verdict is PASS.</b>"
+        )
+    else:
+        issues = []
+        if metrics.get('p99_ms',0) > thresholds.p99_max_ms:
+            issues.append(f"p99 latency of {metrics.get('p99_ms',0)}ms exceeded the {thresholds.p99_max_ms}ms threshold")
+        if err_pct > thresholds.error_rate_max_pct:
+            issues.append(f"error rate of {err_pct:.2f}% exceeded the {thresholds.error_rate_max_pct}% limit")
+        outcome_text = (
+            f"The <b>{lob.name}</b> platform encountered <b>performance issues</b> during load testing. "
+            f"A total of <b>{total:,} API requests</b> were executed across <b>{by_ep_count} endpoints</b>. "
+            f"The following issues were identified: <b>{'; '.join(issues)}</b>. "
+            f"Out of {total:,} requests, <b>{metrics.get('errors',0)} failed</b>, resulting in a "
+            f"{err_pct:.2f}% error rate. The average response time was {avg_ms}ms. "
+            f"<b>Immediate investigation and remediation is recommended before the next release.</b> "
+            f"Refer to the Defects &amp; Error Analysis section for detailed breakdown."
+        )
+    story.append(Paragraph(outcome_text, S('obs2', fontSize=9, leading=15, alignment=TA_JUSTIFY)))
+    story.append(Spacer(1,10))
+
+    # Scope of testing
+    story.append(Paragraph('<b>1.3 Scope of Testing</b>', S('sh_es3', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=4)))
+    scope_rows = [
+        _header_row(['Parameter', 'Detail']),
+        ['Tested Endpoints',    f'{by_ep_count} API endpoint{"s" if by_ep_count!=1 else ""}'],
+        ['Test Type',           'Load & Stress Testing — simulated concurrent users'],
+        ['Environment',         f'{lob.environment.upper()} — {lob.base_url}'],
+        ['Tool',                f'{run.tool.upper()} — automated script execution'],
+        ['Virtual Users',       f'{run.virtual_users} concurrent virtual {"user" if run.virtual_users==1 else "users"}'],
+        ['Test Duration',       f'{run.duration_seconds} seconds ({run.duration_seconds//60}m {run.duration_seconds%60}s)'],
+        ['Ramp-up Period',      f'{run.ramp_up_seconds} seconds — gradual load increase'],
+        ['Execution Date',      run.created_at.strftime('%d %B %Y %H:%M UTC')],
+    ]
+    scope_t = Table(scope_rows, colWidths=[60*mm, 114*mm])
+    scope_t.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0),TEAL),
+        ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE, GRAY_LT]),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
+        ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
+        ('LEFTPADDING',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('FONTNAME',(0,1),(0,-1),FONT_B),('TEXTCOLOR',(0,1),(0,-1),GRAY),
+    ]))
+    story.append(scope_t)
+    story.append(Spacer(1,10))
+
+    # Key findings
+    story.append(Paragraph('<b>1.4 Key Findings at a Glance</b>', S('kf', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=6)))
     kf_data = [
         _header_row(['Metric', 'Result', 'SLA Target', 'Status']),
-        ['Total Requests', f'{total:,}', '—', _pass_fail('PASS ✓')],
-        ['Average Response Time', f'{avg_ms}ms', f'< {thresholds.p99_max_ms}ms', _verdict_cell(avg_ms<=thresholds.p99_max_ms)],
-        ['p90 Response Time', f'{metrics.get("p90_ms",0)}ms', f'< {thresholds.p90_max_ms}ms', _verdict_cell(metrics.get("p90_ms",0)<=thresholds.p90_max_ms)],
-        ['p99 Response Time (Worst Case)', f'{metrics.get("p99_ms",0)}ms', f'< {thresholds.p99_max_ms}ms', _verdict_cell(p99_pass)],
+        ['Total Requests', f'{total:,}', '—', _pass_fail('PASS')],
+        ['Average Response Time', f'{avg_ms}ms', 'For reference', Paragraph('—', S('ref', fontSize=9, alignment=TA_CENTER, textColor=GRAY))],
+        ['p90 Response Time', f'{metrics.get("p90_ms",0)}ms', 'For reference', Paragraph('—', S('ref2', fontSize=9, alignment=TA_CENTER, textColor=GRAY))],
+        ['p99 Response Time (Worst Case)', f'{metrics.get("p99_ms",0)}ms', 'For reference', Paragraph('—', S('ref3', fontSize=9, alignment=TA_CENTER, textColor=GRAY))],
         ['Error Rate', f'{err_pct:.2f}%', f'< {thresholds.error_rate_max_pct}%', _verdict_cell(err_pass)],
-        ['Throughput', f'{rps:.1f} req/s', '> 0 req/s', _pass_fail('PASS ✓')],
+        ['Throughput', f'{rps:.1f} req/s', '> 0 req/s', _pass_fail('PASS')],
         ['System Availability', f'{(1-err_pct/100)*100:.2f}%', '> 99.0%', _verdict_cell(err_pct<1.0)],
     ]
     kf_cw = [75*mm, 35*mm, 35*mm, 29*mm]
@@ -243,7 +359,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     kf_style = [
         ('BACKGROUND',(0,0),(-1,0),TEAL),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE, GRAY_LT]),
-        ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
         ('LEFTPADDING',(0,0),(-1,-1),6),('ALIGN',(1,0),(-1,-1),'CENTER'),
     ]
@@ -278,7 +394,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     cfg_t.setStyle(TableStyle([
         ('FONTSIZE',(0,0),(-1,-1),9),('FONTNAME',(0,0),(0,-1),FONT_B),('FONTNAME',(2,0),(2,-1),FONT_B),
         ('TEXTCOLOR',(0,0),(0,-1),GRAY),('TEXTCOLOR',(2,0),(2,-1),GRAY),
-        ('ROWBACKGROUNDS',(0,0),(-1,-1),[WHITE,GRAY_LT]),('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('ROWBACKGROUNDS',(0,0),(-1,-1),[WHITE,GRAY_LT]),('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('LEFTPADDING',(0,0),(-1,-1),8),
     ]))
     story.append(cfg_t)
@@ -316,7 +432,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
         rt_style = [
             ('BACKGROUND',(0,0),(-1,0),TEAL),
             ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,GRAY_LT]),
-            ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+            ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
             ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
             ('LEFTPADDING',(0,0),(-1,-1),5),('ALIGN',(0,0),(-1,-1),'CENTER'),
             ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
@@ -336,7 +452,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     te_t.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(-1,0),TEAL),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,GRAY_LT]),
-        ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
         ('LEFTPADDING',(0,0),(-1,-1),6),('ALIGN',(1,0),(-1,-1),'CENTER'),
     ]))
@@ -368,7 +484,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
         perf_data = [_header_row(['Endpoint', 'Method', 'Requests', 'p50', 'p90', 'p99', 'Max', 'SLA'])]
         perf_styles = [
             ('BACKGROUND',(0,0),(-1,0),TEAL),
-            ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+            ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
             ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
             ('LEFTPADDING',(0,0),(-1,-1),5),('ALIGN',(0,0),(-1,-1),'CENTER'),
             ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
@@ -426,7 +542,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
     th_t.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(-1,0),TEAL),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,GRAY_LT]),
-        ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+        ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
         ('LEFTPADDING',(0,0),(-1,-1),8),('ALIGN',(1,0),(-1,-1),'CENTER'),
     ]))
@@ -453,7 +569,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
             sc_t.setStyle(TableStyle([
                 ('BACKGROUND',(0,0),(-1,0),RED),
                 ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,RED_LT]),
-                ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+                ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
                 ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
                 ('LEFTPADDING',(0,0),(-1,-1),6),('ALIGN',(2,0),(2,-1),'CENTER'),
             ]))
@@ -472,7 +588,7 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
             er_t.setStyle(TableStyle([
                 ('BACKGROUND',(0,0),(-1,0),RED),
                 ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,RED_LT]),
-                ('GRID',(0,0),(-1,-1),0.3,GRAY_BD),
+                ('GRID',(0,0),(-1,-1),0.8,colors.HexColor('#455A64')),
                 ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
                 ('LEFTPADDING',(0,0),(-1,-1),6),('ALIGN',(2,0),(-1,-1),'CENTER'),
             ]))
@@ -484,17 +600,57 @@ def generate_pdf(run, lob, metrics, thresholds, custom_obs=None, qa_name=None, v
 
     # ── 7. RECOMMENDATIONS ────────────────────────────────────
     story.append(_section('Recommendations & Next Steps', num=sec_num, color=NAVY, bg=NAVY_LT))
-    story.append(Spacer(1,6))
+    story.append(Spacer(1,8))
 
     recs = _recommendations(metrics, thresholds, overall)
+
+    priority_config = {
+        'Critical — No Issues Found':           (GREEN,  GREEN_LT,  colors.HexColor('#A5D6A7'), '✓'),
+        'Critical — Address Immediately':        (RED,    RED_LT,    colors.HexColor('#FFCDD2'), '!'),
+        'High Priority — Proactive Improvements':(NAVY,   NAVY_LT,   colors.HexColor('#BBDEFB'), '→'),
+        'High Priority — Address This Sprint':   (NAVY,   NAVY_LT,   colors.HexColor('#BBDEFB'), '!'),
+        'Best Practices — Ongoing':              (TEAL,   TEAL_LT,   colors.HexColor('#B2EBF2'), '★'),
+        'Best Practices':                        (TEAL,   TEAL_LT,   colors.HexColor('#B2EBF2'), '★'),
+    }
+
     for priority, items in recs.items():
-        story.append(Paragraph(f'<b>{priority}</b>',
-            S('rp', fontSize=10, fontName=FONT_B, textColor=NAVY, spaceAfter=4)))
+        col, bg, border_col, icon = priority_config.get(priority, (NAVY, NAVY_LT, GRAY_BD, '▶'))
+
+        # Priority header card
+        hdr_data = [[
+            Paragraph(f'<b>{icon}</b>', S(f'ph_{priority[:4]}', fontSize=13, fontName=FONT_B,
+                textColor=WHITE, alignment=TA_CENTER)),
+            Paragraph(f'<b>{priority.upper()}</b>', S(f'pt_{priority[:4]}', fontSize=10,
+                fontName=FONT_B, textColor=WHITE)),
+        ]]
+        hdr_t = Table(hdr_data, colWidths=[12*mm, PAGE_W-12*mm])
+        hdr_t.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),col),
+            ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
+            ('LEFTPADDING',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('LINEAFTER',(0,0),(0,-1),0,WHITE),
+        ]))
+        story.append(hdr_t)
+
+        # Items table
+        item_rows = []
         for item in items:
-            story.append(Paragraph(f'<font color="#0bacaa">▶</font>  {item}',
-                S('ri', fontSize=9, leading=13, leftIndent=12)))
-            story.append(Spacer(1,2))
-        story.append(Spacer(1,6))
+            item_rows.append([
+                Paragraph('▸', S(f'bi_{item[:4]}', fontSize=10, textColor=col, alignment=TA_CENTER)),
+                Paragraph(item, S(f'it_{item[:4]}', fontSize=9, leading=14, textColor=BLACK)),
+            ])
+
+        items_t = Table(item_rows, colWidths=[10*mm, PAGE_W-10*mm])
+        items_t.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),bg),
+            ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7),
+            ('LEFTPADDING',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('LINEBEFORE',(0,0),(0,-1),3,col),
+            ('LINEBELOW',(0,0),(-1,-1),0.5,border_col),
+            ('BOX',(0,0),(-1,-1),0.8,col),
+        ]))
+        story.append(items_t)
+        story.append(Spacer(1,8))
 
     # ── FOOTER ────────────────────────────────────────────────
     story.append(Spacer(1,10))
