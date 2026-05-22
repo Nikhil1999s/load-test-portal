@@ -50,4 +50,43 @@ export const suitesApi = {
   get: (id) => api.get(`/suites/${id}`),
 }
 
+const OO_AUTH_KEY = 'oo_test_auth'
+
+export function getOpenObserveTestAuth() {
+  try {
+    return JSON.parse(sessionStorage.getItem(OO_AUTH_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+export function setOpenObserveTestAuth({ jwt, sctoken, org }) {
+  sessionStorage.setItem(OO_AUTH_KEY, JSON.stringify({ jwt: jwt || '', sctoken: sctoken || '', org: org || 'demo' }))
+}
+
+export function clearOpenObserveTestAuth() {
+  sessionStorage.removeItem(OO_AUTH_KEY)
+}
+
+function openObserveHeaders() {
+  const a = getOpenObserveTestAuth()
+  const h = {}
+  if (a.jwt) h['X-OpenObserve-Jwt'] = a.jwt
+  if (a.sctoken) h['X-OpenObserve-Sctoken'] = a.sctoken
+  return h
+}
+
+export const performanceApi = {
+  config: () => api.get('/performance/config'),
+  listRuns: (lobId) => api.get('/performance/runs', { params: lobId ? { lob_id: lobId } : {} }),
+  getRunErrors: (runId, logMode = 'api_errors') =>
+    api.get(`/performance/runs/${runId}/errors`, {
+      params: { log_mode: logMode },
+      headers: openObserveHeaders(),
+    }),
+  getRunStats: (runId) =>
+    api.get(`/performance/runs/${runId}/stats`, { headers: openObserveHeaders() }),
+  testSearch: (body) => api.post('/performance/test-search', body),
+}
+
 export default api
