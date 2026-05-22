@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine
 import models
-from routes import lobs, apis, mappings, runs, reports, thresholds, suites, performance
+from routes import lobs, apis, mappings, runs, reports, thresholds, suites, reports
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -23,7 +23,7 @@ app.include_router(runs.router)
 app.include_router(reports.router)
 app.include_router(thresholds.router)
 app.include_router(suites.router)
-app.include_router(performance.router)
+app.include_router(reports.router)
 
 @app.get("/")
 def root():

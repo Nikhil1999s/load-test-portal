@@ -6,7 +6,6 @@ import APIs from './pages/APIs'
 import Mapping from './pages/Mapping'
 import TestConfig from './pages/TestConfig'
 import Reports from './pages/Reports'
-import Performance from './pages/Performance'
 import Docs from './pages/Docs'
 
 export default function App() {
@@ -24,7 +23,6 @@ export default function App() {
               <Route path="/mapping" element={<Mapping />} />
               <Route path="/testconfig" element={<TestConfig />} />
               <Route path="/reports" element={<Reports />} />
-              <Route path="/performance" element={<Performance />} />
               <Route path="/docs" element={<Docs />} />
             </Routes>
           </main>

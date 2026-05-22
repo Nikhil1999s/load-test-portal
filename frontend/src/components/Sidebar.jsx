@@ -6,7 +6,6 @@ const navItems = [
   { to: '/mapping',    icon: 'ti-arrows-exchange', label: 'LOB ↔ API mapping',  desc: 'Map APIs to LOBs' },
   { to: '/testconfig', icon: 'ti-player-play',     label: 'Test config',        desc: 'Run load tests' },
   { to: '/reports',    icon: 'ti-chart-bar',       label: 'Reports',            desc: 'View & download reports' },
-  { to: '/performance', icon: 'ti-activity-heartbeat', label: 'Performance',   desc: 'OpenObserve error logs' },
   { to: '/docs',       icon: 'ti-book',            label: 'Documentation',      desc: 'Portal guide' },
 ]
 
