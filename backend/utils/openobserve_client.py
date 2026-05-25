@@ -60,7 +60,8 @@ def get_config_status() -> dict[str, Any]:
         "org_default": e.get("OPENOBSERVE_ORG") or HARDCODED_ORG,
         "stream": e.get("OPENOBSERVE_STREAM") or HARDCODED_STREAM,
         "max_hits": int(e.get("OPENOBSERVE_MAX_HITS") or HARDCODED_MAX_HITS),
-        "buffer_seconds": int(e.get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30")),
+        "start_buffer_seconds": int(e.get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30")),
+        "end_buffer_seconds": int(e.get("OPENOBSERVE_END_BUFFER_SECONDS", "120")),
     }
 
 
@@ -96,48 +97,50 @@ def build_lob_sql(lob_name: str, stream: str | None = None) -> str:
     """Same as provided Pulse curl."""
     stream = stream or _stream()
     lob_esc = lob_name.replace("'", "''")
-    return f'select * from "{stream}" WHERE lob = \'{lob_esc}\''
+    return f"select * from '{stream}' where body is not null AND lob = '{lob_esc}'"
 
 
 def build_api_error_sql(lob_name: str) -> str:
-    """HTTP failures during load test (api_request events)."""
+    """HTTP failures during load test (4xx/5xx status codes)."""
     stream = _stream()
     lob_esc = lob_name.replace("'", "''")
     return (
-        f'select * from "{stream}" WHERE lob = \'{lob_esc}\' '
-        f"AND event_type = 'api_request' AND http_status_code >= 400"
+        f"select * from '{stream}' where body is not null AND lob = '{lob_esc}' "
+        f"and http_status_code >= 400"
     )
 
 
 def build_http_aggregation_sql(lob_name: str) -> str:
     """Pulse dashboard: Http Call Aggregation."""
+    stream = _stream()
     lob_esc = lob_name.replace("'", "''")
-    return f"""SELECT
+    return f"""select
     lob,
     http_url_path,
     http_status_code,
-    avg(http_duration) AS average,
-    max(http_duration) AS max_duration,
-    CASE WHEN http_status_code < 400 THEN 'SUCCESS' ELSE 'FAILURE' END AS status,
-    COUNT(*) AS hits
-FROM channelkart
-WHERE event_type = 'api_request' AND lob = '{lob_esc}'
-GROUP BY lob, http_url_path, http_status_code, status
-ORDER BY hits DESC"""
+    avg(http_duration) as average,
+    max(http_duration) as max_duration,
+    case when http_status_code < 400 then 'SUCCESS' else 'FAILURE' end as status,
+    count(*) as hits
+from '{stream}'
+where body is not null AND lob = '{lob_esc}'
+group by lob, http_url_path, http_status_code, status
+order by hits desc"""
 
 
 def build_http_timeline_sql(lob_name: str, bucket_interval: str = "30 second") -> str:
-    """Per-bucket avg/max latency during the run (api_request only)."""
+    """Per-bucket avg/max latency during the run."""
+    stream = _stream()
     lob_esc = lob_name.replace("'", "''")
-    return f"""SELECT
-  histogram(_timestamp, '{bucket_interval}') AS bucket,
-  avg(http_duration) AS avg_ms,
-  max(http_duration) AS max_ms,
-  count(*) AS hits
-FROM channelkart
-WHERE event_type = 'api_request' AND lob = '{lob_esc}'
-GROUP BY bucket
-ORDER BY bucket ASC"""
+    return f"""select
+  histogram(_timestamp, '{bucket_interval}') as bucket,
+  avg(http_duration) as avg_ms,
+  max(http_duration) as max_ms,
+  count(*) as hits
+from '{stream}'
+where body is not null AND lob = '{lob_esc}'
+group by bucket
+order by bucket asc"""
 
 
 def build_cpu_sql(instance_prefix: str = "10.10.%") -> str:
@@ -170,14 +173,55 @@ ORDER BY bucket ASC"""
 
 
 def build_http_errors_timeline_sql(lob_name: str, bucket_interval: str = "30 second") -> str:
+    stream = _stream()
     lob_esc = lob_name.replace("'", "''")
-    return f"""SELECT
-  histogram(_timestamp, '{bucket_interval}') AS bucket,
-  count(*) AS error_count
-FROM channelkart
-WHERE event_type = 'api_request' AND lob = '{lob_esc}' AND http_status_code >= 400
-GROUP BY bucket
-ORDER BY bucket ASC"""
+    return f"""select
+  histogram(_timestamp, '{bucket_interval}') as bucket,
+  count(*) as error_count
+from '{stream}'
+where body is not null AND lob = '{lob_esc}' and http_status_code >= 400
+group by bucket
+order by bucket asc"""
+
+
+# ===================== DASHBOARD PANEL SQL BUILDERS =====================
+
+def _percentiles_stream() -> str:
+    """Get stream name for percentiles queries (e.g., 'channelkart' from 'channelkart_logs')."""
+    stream = _stream()  # e.g., 'channelkart_logs'
+    # Remove '_logs' suffix if present to get the base stream name
+    if stream.endswith("_logs"):
+        return stream[:-5]  # 'channelkart_logs' -> 'channelkart'
+    return stream
+
+
+def build_percentiles_sql() -> str:
+    """Percentiles timeline (p50, p90, p95, p99, max) from http_duration."""
+    stream = _percentiles_stream()
+    return f"""SELECT histogram(_timestamp) as "x_axis_1",
+    approx_percentile_cont(http_duration, 0.50) AS p50_duration,
+    approx_percentile_cont(http_duration, 0.90) AS p90_duration,
+    max(http_duration) as max,
+    approx_percentile_cont(http_duration, 0.95) AS p95_duration,
+    approx_percentile_cont(http_duration, 0.99) AS p99_duration
+FROM "{stream}"
+GROUP BY x_axis_1
+ORDER BY x_axis_1 ASC"""
+
+
+def build_percentiles_count_sql() -> str:
+    """Percentiles Count timeline - request counts within each percentile bucket."""
+    stream = _percentiles_stream()
+    return f"""SELECT histogram(_timestamp) as time,
+    count(*) AS total_requests,
+    count(*) * 0.99 AS requests_within_p99,
+    count(*) * 0.95 AS requests_within_p95,
+    count(*) * 0.01 AS requests_above_p99,
+    count(*) * 0.5 as requests_within_p50
+FROM "{stream}"
+WHERE event_type = 'api_request'
+GROUP BY time
+ORDER BY time"""
 
 
 def build_error_sql(lob_name: str, stream: str | None = None) -> str:
@@ -185,14 +229,14 @@ def build_error_sql(lob_name: str, stream: str | None = None) -> str:
     lob_esc = lob_name.replace("'", "''")
     sev_list = ", ".join(f"'{s}'" for s in _ERROR_SEVERITIES)
     extra = _cfg().get("OPENOBSERVE_ERROR_SQL_EXTRA", "").strip()
-    extra_clause = f" AND ({extra})" if extra else ""
+    extra_clause = f" and ({extra})" if extra else ""
     return (
-        f'SELECT * FROM "{stream}" WHERE lob = \'{lob_esc}\' AND ('
-        f"severity IN ({sev_list}) "
-        f"OR (event_status IS NOT NULL AND lower(event_status) NOT IN ('success', '')) "
-        f"OR lower(coalesce(body, '')) LIKE '%exception%' "
-        f"OR lower(coalesce(body, '')) LIKE '%error%' "
-        f"OR lower(coalesce(event_message, '')) LIKE '%fail%'"
+        f"select * from '{stream}' where body is not null AND lob = '{lob_esc}' and ("
+        f"severity in ({sev_list}) "
+        f"or (event_status is not null and lower(event_status) not in ('success', '')) "
+        f"or lower(coalesce(body, '')) like '%exception%' "
+        f"or lower(coalesce(body, '')) like '%error%' "
+        f"or lower(coalesce(event_message, '')) like '%fail%'"
         f"){extra_clause}"
     )
 
@@ -420,16 +464,21 @@ def normalize_hit(raw: dict) -> dict[str, Any]:
         "timestamp": ts_iso,
         "severity": _format_severity(raw),
         "message": _build_message(raw),
+        "body": raw.get("body", ""),
         "service": raw.get("service_name", ""),
         "lob": raw.get("lob", ""),
         "http_method": str(method) if method is not None else "",
         "http_route": str(route) if route is not None else "",
         "http_status": str(status) if status is not None else "",
         "event_status": str(raw.get("event_status", "") or ""),
+        "event_message": raw.get("event_message", ""),
         "event_duration_ms": duration,
         "event_topic": raw.get("event_topic", ""),
         "event_type": raw.get("event_type", ""),
         "instance_id": raw.get("instance_id", ""),
+        "user_name": raw.get("user_name", ""),
+        "exception_message": raw.get("exception_message", ""),
+        "exception_type": raw.get("exception_type", ""),
         "instrumentation": raw.get("instrumentation_library_name", ""),
         "full_message": _full_log_text(raw),
     }
@@ -454,6 +503,7 @@ def search_stream_raw(
     auth_override: dict[str, str] | None = None,
     org_override: str | None = None,
     size: int | None = None,
+    dashboard_params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if not has_auth(auth_override):
         raise ValueError("OpenObserve auth missing.")
@@ -467,7 +517,18 @@ def search_stream_raw(
             size = -1
 
     url = f"{base}/api/{org}/_search_stream"
-    params = {"type": stream_type, "search_type": search_type, "use_cache": "true"}
+    params = {
+        "type": stream_type,
+        "search_type": search_type,
+        "use_cache": "true",
+    }
+    # Add dashboard metadata params if provided (matches Pulse curl format)
+    if search_type == "dashboards" and dashboard_params:
+        params.update(dashboard_params)
+    # For dashboard queries without specific params, add minimal required params
+    elif search_type == "dashboards":
+        params["is_multi_stream_search"] = "false"
+
     body = {
         "query": {
             "sql": sql,
@@ -476,7 +537,7 @@ def search_stream_raw(
             "from": 0,
             "size": size,
             "quick_mode": False,
-            "query_fn": None,
+            "sql_mode": "full",
         }
     }
 
@@ -704,23 +765,23 @@ def build_mismatch_diagnostic_sql() -> dict[str, str]:
     """SQL queries to diagnose why k6 requests don't appear in Pulse."""
     stream = _stream()
     return {
-        # Count all api_request logs (no LOB filter) - are there more with different LOB?
-        "all_api_requests": f"""SELECT COUNT(*) as total FROM "{stream}" WHERE event_type = 'api_request'""",
+        # Count all logs (no LOB filter)
+        "all_requests": f"""select count(*) as total from '{stream}' where body is not null""",
 
         # Group by LOB to see which LOBs have logs
-        "by_lob": f"""SELECT lob, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY lob ORDER BY count DESC""",
+        "by_lob": f"""select lob, count(*) as count from '{stream}' where body is not null group by lob order by count desc""",
 
         # Group by user_agent to see k6 vs other traffic
-        "by_user_agent": f"""SELECT http_user_agent, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY http_user_agent ORDER BY count DESC LIMIT 10""",
+        "by_user_agent": f"""select http_user_agent, count(*) as count from '{stream}' where body is not null group by http_user_agent order by count desc limit 10""",
 
         # Group by endpoint to see which endpoints are logged
-        "by_endpoint": f"""SELECT http_url_path, COUNT(*) as count FROM "{stream}" WHERE event_type = 'api_request' GROUP BY http_url_path ORDER BY count DESC LIMIT 20""",
+        "by_endpoint": f"""select http_url_path, count(*) as count from '{stream}' where body is not null group by http_url_path order by count desc limit 20""",
 
-        # Count all logs (any event_type) to see total activity
-        "all_logs": f"""SELECT event_type, COUNT(*) as count FROM "{stream}" GROUP BY event_type ORDER BY count DESC LIMIT 10""",
+        # Count all logs by event_type to see total activity
+        "all_logs": f"""select event_type, count(*) as count from '{stream}' where body is not null group by event_type order by count desc limit 10""",
 
-        # Get first and last timestamp of api_request logs in window (for timing debug)
-        "time_range": f"""SELECT MIN(_timestamp) as first_log_us, MAX(_timestamp) as last_log_us FROM "{stream}" WHERE event_type = 'api_request'""",
+        # Get first and last timestamp of logs in window (for timing debug)
+        "time_range": f"""select min(_timestamp) as first_log_us, max(_timestamp) as last_log_us from '{stream}' where body is not null""",
     }
 
 
@@ -990,3 +1051,128 @@ def search_error_logs(
         auth_override=auth_override,
         org_override=org_override,
     )
+
+
+# ===================== DASHBOARD PANEL SEARCH FUNCTIONS =====================
+
+def _parse_percentiles_timeline(hits: list[dict]) -> dict[str, Any]:
+    """Parse percentiles timeline data."""
+    points = []
+    for h in hits:
+        points.append({
+            "time": _bucket_to_iso(h.get("x_axis_1")),
+            "p50": round(float(h.get("p50_duration") or 0), 2),
+            "p90": round(float(h.get("p90_duration") or 0), 2),
+            "p95": round(float(h.get("p95_duration") or 0), 2),
+            "p99": round(float(h.get("p99_duration") or 0), 2),
+            "max": round(float(h.get("max") or 0), 2),
+        })
+    # Calculate overall stats
+    if points:
+        p50_vals = [p["p50"] for p in points]
+        p90_vals = [p["p90"] for p in points]
+        p95_vals = [p["p95"] for p in points]
+        p99_vals = [p["p99"] for p in points]
+        max_vals = [p["max"] for p in points]
+        summary = {
+            "p50_avg": round(sum(p50_vals) / len(p50_vals), 2),
+            "p90_avg": round(sum(p90_vals) / len(p90_vals), 2),
+            "p95_avg": round(sum(p95_vals) / len(p95_vals), 2),
+            "p99_avg": round(sum(p99_vals) / len(p99_vals), 2),
+            "max_overall": round(max(max_vals), 2),
+        }
+    else:
+        summary = {"p50_avg": 0, "p90_avg": 0, "p95_avg": 0, "p99_avg": 0, "max_overall": 0}
+    return {"points": points, "summary": summary}
+
+
+def _parse_percentiles_count_timeline(hits: list[dict]) -> dict[str, Any]:
+    """Parse percentiles count timeline data."""
+    points = []
+    for h in hits:
+        points.append({
+            "time": _bucket_to_iso(h.get("time")),
+            "total_requests": int(h.get("total_requests") or 0),
+            "requests_within_p99": round(float(h.get("requests_within_p99") or 0), 0),
+            "requests_within_p95": round(float(h.get("requests_within_p95") or 0), 0),
+            "requests_within_p50": round(float(h.get("requests_within_p50") or 0), 0),
+            "requests_above_p99": round(float(h.get("requests_above_p99") or 0), 0),
+        })
+    total_requests = sum(p["total_requests"] for p in points)
+    return {"points": points, "total_requests": total_requests}
+
+
+def search_percentiles(
+    start_time_us: int,
+    end_time_us: int,
+    lob_environment: str = "demo",
+    auth_override: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Percentiles timeline (p50, p90, p95, p99, max)."""
+    sql = build_percentiles_sql()
+    dashboard_params = {
+        "is_multi_stream_search": "false",
+        "fallback_order_by_col": "x_axis_1",
+    }
+    raw = search_stream_raw(
+        sql, start_time_us, end_time_us, lob_environment,
+        stream_type="logs", search_type="dashboards", auth_override=auth_override,
+        dashboard_params=dashboard_params,
+    )
+    timeline = _parse_percentiles_timeline(raw["hits"])
+    return {**raw, "timeline": timeline}
+
+
+def search_percentiles_count(
+    start_time_us: int,
+    end_time_us: int,
+    lob_environment: str = "demo",
+    auth_override: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Percentiles Count timeline."""
+    sql = build_percentiles_count_sql()
+    dashboard_params = {
+        "is_multi_stream_search": "false",
+        "fallback_order_by_col": "time",
+    }
+    raw = search_stream_raw(
+        sql, start_time_us, end_time_us, lob_environment,
+        stream_type="logs", search_type="dashboards", auth_override=auth_override,
+        dashboard_params=dashboard_params,
+    )
+    timeline = _parse_percentiles_count_timeline(raw["hits"])
+    return {**raw, "timeline": timeline}
+
+
+def build_dashboard_snapshot(
+    lob_name: str,
+    start_time_us: int,
+    end_time_us: int,
+    lob_environment: str = "demo",
+    auth_override: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fetch dashboard panel data: CPU utilization and CPU by service."""
+    errors: list[str] = []
+    cpu_data: dict = {}
+    cpu_tl: dict = {}
+
+    # CPU stats (by service)
+    try:
+        cpu_data = search_cpu_stats(start_time_us, end_time_us, lob_environment, auth_override)
+    except Exception as e:
+        errors.append(f"CPU: {e}")
+
+    # CPU timeline
+    try:
+        cpu_tl = search_cpu_timeline(start_time_us, end_time_us, lob_environment, auth_override)
+    except Exception as e:
+        errors.append(f"CPU Timeline: {e}")
+
+    return {
+        "partial_errors": errors,
+        "cpu": {
+            "services": cpu_data.get("services", []),
+            "summary": cpu_data.get("summary", {}),
+            "timeline": cpu_tl.get("timeline", {"points": [], "peak": None}),
+        },
+    }

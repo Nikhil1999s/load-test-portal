@@ -5,7 +5,7 @@ Set OPENOBSERVE_USE_HARDCODED=false in .env to disable.
 
 HARDCODED_BASE_URL = "https://pulse.salescode.ai"
 HARDCODED_ORG = "demo"
-HARDCODED_STREAM = "channelkart"
+HARDCODED_STREAM = "channelkart_logs"
 HARDCODED_MAX_HITS = 51
 
 # Full Cookie header from provided curl (jwt + sctoken + session cookies)

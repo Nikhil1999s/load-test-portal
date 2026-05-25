@@ -15,6 +15,7 @@ from utils.openobserve_client import (
     search_http_timeline,
     search_cpu_timeline,
     build_performance_snapshot,
+    build_dashboard_snapshot,
     dt_to_microseconds,
     build_error_sql,
     build_lob_sql,
@@ -35,7 +36,7 @@ def _iso_utc(dt: datetime) -> str:
 
 
 def _run_time_window(
-    run: models.TestRun, buffer_seconds: int, *, strict: bool = False
+    run: models.TestRun, buffer_seconds: int, *, strict: bool = False, end_buffer_seconds: int = 120
 ) -> tuple[datetime, datetime]:
     # Use test_started_at (actual subprocess start) if available, else fallback to created_at
     start = run.test_started_at if run.test_started_at else run.created_at
@@ -49,13 +50,19 @@ def _run_time_window(
     else:
         end = start + timedelta(seconds=run.duration_seconds or 60)
 
-    # Always add buffer to account for:
-    # - k6/jmeter startup time (1-3 seconds)
-    # - Log sync lag in OpenObserve (can be 10-30 seconds)
-    # Default buffer: 30 seconds on each side
-    default_buffer = 30
-    buf = timedelta(seconds=buffer_seconds if buffer_seconds > 0 else default_buffer)
-    return start - buf, end + buf
+    # Buffer at START: accounts for k6/jmeter startup time (1-3 seconds)
+    # and initial log sync lag in OpenObserve (can be 10-30 seconds)
+    # Default start buffer: 30 seconds
+    default_start_buffer = 30
+    start_buf = timedelta(seconds=buffer_seconds if buffer_seconds > 0 else default_start_buffer)
+
+    # Buffer at END: accounts for logs and CPU metrics that are recorded AFTER
+    # the load test ends (log sync lag can be significant - up to 2 minutes)
+    # Default end buffer: 120 seconds (2 minutes)
+    # If test ended at 10:20, we fetch logs until 10:22
+    end_buf = timedelta(seconds=end_buffer_seconds)
+
+    return start - start_buf, end + end_buf
 
 
 def _auth_from_headers(
@@ -79,7 +86,8 @@ def _list_runs(lob_id: Optional[int], db: Session):
     )
     if lob_id:
         query = query.filter(models.TestRun.lob_id == lob_id)
-    runs = query.order_by(models.TestRun.created_at.desc()).limit(100).all()
+    # Only show last 5 runs
+    runs = query.order_by(models.TestRun.created_at.desc()).limit(5).all()
     result = []
     for run in runs:
         lob = db.query(models.LOB).filter(models.LOB.id == run.lob_id).first()
@@ -128,9 +136,12 @@ def _run_context(run_id: int, db: Session, *, strict: bool = False):
     lob = db.query(models.LOB).filter(models.LOB.id == run.lob_id).first()
     if not lob:
         raise HTTPException(status_code=404, detail="LOB not found")
-    buffer = 0 if strict else int(load_env().get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30"))
-    start_dt, end_dt = _run_time_window(run, buffer, strict=strict)
-    return run, lob, buffer, start_dt, end_dt, strict
+    env = load_env()
+    start_buffer = 0 if strict else int(env.get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30"))
+    # 2-minute end buffer to capture logs/CPU metrics after load test ends
+    end_buffer = 0 if strict else int(env.get("OPENOBSERVE_END_BUFFER_SECONDS", "120"))
+    start_dt, end_dt = _run_time_window(run, start_buffer, strict=strict, end_buffer_seconds=end_buffer)
+    return run, lob, start_buffer, end_buffer, start_dt, end_dt, strict
 
 
 def _k6_metrics(run: models.TestRun) -> dict:
@@ -176,7 +187,9 @@ def test_openobserve_search(body: TestSearchRequest, db: Session = Depends(get_d
     lob_env = "demo"
     start_us = body.start_time_us
     end_us = body.end_time_us
-    buffer = int(load_env().get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30"))
+    env = load_env()
+    start_buffer = int(env.get("OPENOBSERVE_TIME_BUFFER_SECONDS", "30"))
+    end_buffer = int(env.get("OPENOBSERVE_END_BUFFER_SECONDS", "120"))
 
     if body.run_id:
         run = db.query(models.TestRun).filter(models.TestRun.id == body.run_id).first()
@@ -187,7 +200,7 @@ def test_openobserve_search(body: TestSearchRequest, db: Session = Depends(get_d
             raise HTTPException(status_code=404, detail="LOB not found")
         lob_name = lob.name
         lob_env = lob.environment or "demo"
-        start_dt, end_dt = _run_time_window(run, buffer, strict=False)
+        start_dt, end_dt = _run_time_window(run, start_buffer, strict=False, end_buffer_seconds=end_buffer)
         start_us = dt_to_microseconds(start_dt)
         end_us = dt_to_microseconds(end_dt)
 
@@ -234,7 +247,7 @@ def get_run_error_logs(
 ):
     """log_mode: api_errors (HTTP 4xx/5xx) | generic (severity/body filter) | all (raw lob filter)"""
     auth = _auth_from_headers(x_openobserve_jwt, x_openobserve_sctoken, x_openobserve_cookie)
-    run, lob, buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=True)
+    run, lob, start_buffer, end_buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=True)
 
     if not has_auth(auth):
         raise HTTPException(status_code=503, detail="OpenObserve not configured.")
@@ -270,7 +283,7 @@ def get_run_error_logs(
     except Exception:
         data["cpu"] = {"timeline": {"points": [], "peak": None}}
 
-    return _run_payload(run, lob, buffer, start_dt, end_dt, data, strict=strict)
+    return _run_payload(run, lob, start_buffer, end_buffer, start_dt, end_dt, data, strict=strict)
 
 
 @router.get("/runs/{run_id}/stats")
@@ -282,8 +295,8 @@ def get_run_performance_stats(
     x_openobserve_cookie: Optional[str] = Header(None),
 ):
     auth = _auth_from_headers(x_openobserve_jwt, x_openobserve_sctoken, x_openobserve_cookie)
-    # Use 30 second buffer to account for log sync lag
-    run, lob, buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=False)
+    # Use 30 second start buffer and 2-minute end buffer to capture logs after test ends
+    run, lob, start_buffer, end_buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=False)
 
     if not has_auth(auth):
         raise HTTPException(status_code=503, detail="OpenObserve not configured.")
@@ -302,10 +315,10 @@ def get_run_performance_stats(
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    return {**_run_payload(run, lob, buffer, start_dt, end_dt, {}, strict=strict), **perf}
+    return {**_run_payload(run, lob, start_buffer, end_buffer, start_dt, end_dt, {}, strict=strict), **perf}
 
 
-def _run_payload(run, lob, buffer, start_dt, end_dt, data: dict, *, strict: bool = False) -> dict:
+def _run_payload(run, lob, start_buffer, end_buffer, start_dt, end_dt, data: dict, *, strict: bool = False) -> dict:
     # Calculate microsecond timestamps for debugging
     start_us = dt_to_microseconds(start_dt)
     end_us = dt_to_microseconds(end_dt)
@@ -324,8 +337,104 @@ def _run_payload(run, lob, buffer, start_dt, end_dt, data: dict, *, strict: bool
         "window": {
             "start": _iso_utc(start_dt),
             "end": _iso_utc(end_dt),
-            "buffer_seconds": buffer,
-            "note": f"OpenObserve logs within ±{buffer}s of run time",
+            "start_buffer_seconds": start_buffer,
+            "end_buffer_seconds": end_buffer,
+            "note": f"Logs fetched from -{start_buffer}s before start to +{end_buffer}s after end (2-min buffer captures delayed logs/CPU)",
         },
         **data,
+    }
+
+
+@router.get("/runs/{run_id}/dashboard")
+def get_run_dashboard(
+    run_id: int,
+    db: Session = Depends(get_db),
+    x_openobserve_jwt: Optional[str] = Header(None),
+    x_openobserve_sctoken: Optional[str] = Header(None),
+    x_openobserve_cookie: Optional[str] = Header(None),
+):
+    """
+    Fetch all dashboard panel data for a run:
+    - LOB DB Connection Count
+    - System DB Connection
+    - Active HTTP Requests
+    - CPU Utilization
+    - Memory Utilization
+    - Percentiles (p50, p90, p95, p99)
+    - Percentiles Count
+    """
+    auth = _auth_from_headers(x_openobserve_jwt, x_openobserve_sctoken, x_openobserve_cookie)
+    run, lob, start_buffer, end_buffer, start_dt, end_dt, strict = _run_context(run_id, db, strict=False)
+
+    if not has_auth(auth):
+        raise HTTPException(status_code=503, detail="OpenObserve not configured.")
+
+    start_us = dt_to_microseconds(start_dt)
+    end_us = dt_to_microseconds(end_dt)
+    env = lob.environment or "demo"
+
+    try:
+        dashboard = build_dashboard_snapshot(
+            lob.name, start_us, end_us, env, auth_override=auth
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"OpenObserve failed: {e.response.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {**_run_payload(run, lob, start_buffer, end_buffer, start_dt, end_dt, {}, strict=strict), **dashboard}
+
+
+class DashboardSearchRequest(BaseModel):
+    """Request body for direct dashboard panel queries."""
+    jwt: Optional[str] = None
+    sctoken: Optional[str] = None
+    cookie: Optional[str] = None
+    org: str = "demo"
+    start_time_us: int
+    end_time_us: int
+
+
+@router.post("/dashboard")
+def search_dashboard_panels(body: DashboardSearchRequest):
+    """
+    Direct dashboard panel query without a run context.
+    Useful for custom time ranges.
+    """
+    auth = {
+        k: v
+        for k, v in {
+            "jwt": body.jwt,
+            "sctoken": body.sctoken,
+            "cookie": body.cookie,
+        }.items()
+        if v
+    }
+    if not has_auth(auth):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide jwt, sctoken, or cookie in request body",
+        )
+
+    try:
+        dashboard = build_dashboard_snapshot(
+            lob_name="",  # Not needed for these queries
+            start_time_us=body.start_time_us,
+            end_time_us=body.end_time_us,
+            lob_environment=body.org,
+            auth_override=auth,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenObserve {e.response.status_code}: {e.response.text[:400]}",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {
+        "ok": True,
+        "start_time_us": body.start_time_us,
+        "end_time_us": body.end_time_us,
+        **dashboard,
     }

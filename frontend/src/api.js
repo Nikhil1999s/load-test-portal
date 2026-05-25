@@ -86,7 +86,10 @@ export const performanceApi = {
     }),
   getRunStats: (runId) =>
     api.get(`/performance/runs/${runId}/stats`, { headers: openObserveHeaders() }),
+  getRunDashboard: (runId) =>
+    api.get(`/performance/runs/${runId}/dashboard`, { headers: openObserveHeaders() }),
   testSearch: (body) => api.post('/performance/test-search', body),
+  searchDashboard: (body) => api.post('/performance/dashboard', body),
 }
 
 export default api
