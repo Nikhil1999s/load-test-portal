@@ -94,6 +94,7 @@ class TestRun(Base):
     status = Column(String, default="pending")
     report_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    test_started_at = Column(DateTime, nullable=True)  # When actual k6/jmeter subprocess starts
     finished_at = Column(DateTime, nullable=True)
 
     suite = relationship("TestSuite", back_populates="runs")

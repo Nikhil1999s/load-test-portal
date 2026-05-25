@@ -39,6 +39,7 @@ class RunResponse(BaseModel):
     status: str
     report_json: Optional[str]
     created_at: datetime
+    test_started_at: Optional[datetime]
     finished_at: Optional[datetime]
 
     class Config:
@@ -274,6 +275,10 @@ def run_k6(config: RunConfig, db: Session = Depends(get_db)):
             f.write(script)
             script_path = f.name
 
+        # Record actual test start time (after script generation, before subprocess)
+        run.test_started_at = datetime.utcnow()
+        db.commit()
+
         result = subprocess.run(
             ["k6", "run", "--out", "json=-", script_path],
             capture_output=True, text=True,
@@ -441,6 +446,10 @@ def run_jmeter(config: RunConfig, db: Session = Depends(get_db)):
 
         with open(jmx_path, "w") as f:
             f.write(jmx_content)
+
+        # Record actual test start time (after JMX generation, before subprocess)
+        run.test_started_at = datetime.utcnow()
+        db.commit()
 
         result = subprocess.run(
             ["jmeter", "-n", "-t", jmx_path, "-l", jtl_path, "-e", "-o", report_dir],

@@ -64,12 +64,18 @@ def generate_k6_script(lob, mappings, virtual_users, duration_seconds, ramp_up_s
 
     total_weight = sum(s["weight"] for s in scenarios)
 
+    # Build cumulative thresholds for weighted random selection
+    # e.g., [0.17, 0.34, 0.51, ...] so each endpoint gets its fair share
     scenario_blocks = []
-    for s in scenarios:
-        pct    = round(s["weight"] / total_weight * 100)
+    cumulative_pct = 0.0
+
+    for i, s in enumerate(scenarios):
+        pct = s["weight"] / total_weight
+        cumulative_pct += pct
+
         method = s["method"].lower()
         endpoint = s["endpoint"] + url_suffix
-        name   = s["name"]
+        name = s["name"]
         body_line = f', {s["body"]}' if s["body"] else ""
         # use API-level base URL override if present, else LOB base URL
         api_base = s.get("base_url_override") or base_url
@@ -79,12 +85,15 @@ def generate_k6_script(lob, mappings, virtual_users, duration_seconds, ramp_up_s
         else:
             call = f'http.{method}(`{api_base}{endpoint}`{body_line}, params)'
 
-        scenario_blocks.append(f"""  // {name} — {pct}% traffic
-  if (rnd < {pct / 100:.2f}) {{
+        # Use "if" for first, "else if" for rest - cumulative ranges
+        if_keyword = "if" if i == 0 else "} else if"
+        pct_display = round(pct * 100)
+
+        scenario_blocks.append(f"""  // {name} — {pct_display}% traffic
+  {if_keyword} (rnd < {cumulative_pct:.2f}) {{
     const res = {call};
     check(res, {{ '{name} status 2xx': (r) => r.status >= 200 && r.status < 300 }});
-    errorRate.add(res.status >= 400);
-  }}""")
+    errorRate.add(res.status >= 400);""")
 
     threshold_checks = "\n".join([
         "  http_req_duration: ['p(90)<10000', 'p(99)<30000'],",
@@ -108,7 +117,40 @@ def generate_k6_script(lob, mappings, virtual_users, duration_seconds, ramp_up_s
   }},
 }};"""
 
-    duration_line = f"duration: '{duration_seconds}s'," if not iterations else f"iterations: {iterations},"
+    # Build stages for proper ramp-up (if not using iterations)
+    if iterations:
+        options_block = f"""export const options = {{
+  vus: {virtual_users},
+  iterations: {iterations},
+  thresholds: {{
+{threshold_checks}
+  }},
+}};"""
+    else:
+        # Handle edge cases for ramp_up_seconds
+        ramp_up = ramp_up_seconds if ramp_up_seconds and ramp_up_seconds > 0 else 1
+
+        # If ramp_up is very small or 0, just use simple duration
+        if ramp_up <= 1:
+            options_block = f"""export const options = {{
+  vus: {virtual_users},
+  duration: '{duration_seconds}s',
+  thresholds: {{
+{threshold_checks}
+  }},
+}};"""
+        else:
+            # Use stages for ramp-up
+            hold_duration = max(1, duration_seconds - ramp_up)
+            options_block = f"""export const options = {{
+  stages: [
+    {{ duration: '{ramp_up}s', target: {virtual_users} }},  // ramp up
+    {{ duration: '{hold_duration}s', target: {virtual_users} }},    // hold
+  ],
+  thresholds: {{
+{threshold_checks}
+  }},
+}};"""
 
     script = f"""import http from 'k6/http';
 import {{ check, sleep }} from 'k6';
@@ -117,13 +159,7 @@ import {{ Rate }} from 'k6/metrics';
 const errorRate = new Rate('error_rate');
 const BASE_URL = '{base_url}';
 
-export const options = {{
-  vus: {virtual_users},
-  {duration_line}
-  thresholds: {{
-{threshold_checks}
-  }},
-}};
+{options_block}
 
 {headers_block}
 
@@ -131,6 +167,7 @@ export default function () {{
   const rnd = Math.random();
 
 {"".join(chr(10) + s for s in scenario_blocks)}
+  }}
 
   sleep(1);
 }}
